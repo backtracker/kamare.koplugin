@@ -1,3 +1,29 @@
+local GetText = require("gettext")
+
+-- Load the plugin's own gettext catalog before requiring the modules below.
+-- Several of them evaluate translated strings at load time (the settings menu,
+-- browser titles, ...), and KOReader only loads the core catalogs itself.
+do
+    local source = debug.getinfo(1, "S").source
+    local plugin_dir = source and source:match("^@(.+)[/\\][^/\\]+$")
+    local lang = GetText.current_lang
+    if plugin_dir and lang and lang ~= "C" then
+        local langs = { lang }
+        if lang == "zh" then
+            table.insert(langs, "zh_CN")
+        end
+        for _, code in ipairs(langs) do
+            local mo_path = plugin_dir .. "/l10n/" .. code .. "/kamare.mo"
+            local mo_file = io.open(mo_path, "rb")
+            if mo_file then
+                mo_file:close()
+                GetText.loadMO(mo_path)
+                break
+            end
+        end
+    end
+end
+
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local KavitaBrowser = require("kavitabrowser")
@@ -8,7 +34,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local NetworkMgr = require("ui/network/manager")
 local random = require("frontend/random")
-local _ = require("gettext")
+local _ = GetText
 
 local Kamare = WidgetContainer:extend{
     name = "kamare",

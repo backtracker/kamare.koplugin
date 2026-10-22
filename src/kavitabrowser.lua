@@ -336,7 +336,7 @@ function KavitaBrowser:buildKavitaDashboardItems(dashboard)
 
     -- Manually add "Want to Read" after the dashboard items
     local item = {
-        text = "Want to Read",
+        text = _("Want to Read"),
         kavita_dashboard = true,
         kavita_stream_name = "want-to-read",
         dashboard = { name = "want-to-read" },
@@ -503,7 +503,7 @@ function KavitaBrowser:buildKavitaVolumeItems(volumes)
             local name = Utils.buildVolumeTitle(v)
             local read = v.pagesRead
             local total = v.pages
-            local subtitle = (total and read) and (tostring(read) .. "/" .. tostring(total) .. " pages") or nil
+            local subtitle = (total and read) and T(_("%1/%2 pages"), tostring(read), tostring(total)) or nil
             local mandatory = progress_icon(read, total)
             local item = {
                 text = name,
@@ -539,7 +539,7 @@ function KavitaBrowser:buildKavitaChapterItems(chapters, kind)
             local total = c.pages
             local subtitle
             if total and read then
-                subtitle = tostring(read) .. "/" .. tostring(total) .. " pages"
+                subtitle = T(_("%1/%2 pages"), tostring(read), tostring(total))
             end
 
             local mandatory = progress_icon(read, total)
@@ -930,7 +930,7 @@ function KavitaBrowser:buildKavitaReadingListItemItems(rli_items)
             local read  = rli.pagesRead or 0
             local subtitle
             if pages and pages > 0 then
-                subtitle = tostring(read) .. "/" .. tostring(pages) .. " pages"
+                subtitle = T(_("%1/%2 pages"), tostring(read), tostring(pages))
             end
             local mandatory = progress_icon(read, pages)
 

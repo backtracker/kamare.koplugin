@@ -1,6 +1,7 @@
 local optionsutil = require("ui/data/optionsutil")
 local Device = require("device")
 local _ = require("gettext")
+local C_ = _.pgettext
 
 local KamareOptions = {
     prefix = "kamare",
@@ -96,7 +97,7 @@ local KamareOptions = {
             {
                 name = "background_color",
                 name_text = _("Background Color"),
-                toggle = {_("Black"), _("White")},
+                toggle = {C_("Background color", "Black"), C_("Background color", "White")},
                 values = {0, 1},
                 args = {0, 1},
                 default_value = 1,

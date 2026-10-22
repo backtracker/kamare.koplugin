@@ -1,0 +1,571 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: kamare\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "A manga reader that connects to your personal Kavita server."
+msgstr "连接个人 Kavita 服务器的漫画阅读器。"
+
+msgid "API key"
+msgstr "API 密钥"
+
+msgid "Add Kavita server"
+msgstr "添加 Kavita 服务器"
+
+msgid "Adjust"
+msgstr "调整"
+
+msgid "Adjust image contrast (gamma). Higher values increase contrast for darker blacks. 1.0 is no adjustment."
+msgstr "调整图像对比度（伽马值）。数值越高，黑色越深、对比越强；1.0 表示不做调整。"
+
+msgid "Auto rotation adjusts screen orientation automatically. Locked keeps the current system rotation fixed."
+msgstr "“自动”会根据设备方向自动调整屏幕方向；“锁定”则保持当前系统旋转方向不变。"
+
+msgid "Automatically trim uniform white or black margins around page content (Mihon-style). Each page is analyzed after download; pages without uniform borders are left unchanged. Detection adds a one-time decode per page."
+msgstr "自动裁掉页面内容周围纯白或纯黑的边距（类似 Mihon）。每页下载后都会进行分析；没有统一边框的页面保持原样。检测会给每页增加一次解码开销。"
+
+msgid "Background Color"
+msgstr "背景颜色"
+
+msgid "Boost color saturation to make colors pop on dim e-ink screens. 1.0 = neutral, higher = more vivid, lower = desaturated (0 = grayscale). Uses a smart curve that protects already-vivid colors from clipping and leaves grays untouched. Only affects color rendering."
+msgstr "提升色彩饱和度，让颜色在较暗的电子墨水屏上更鲜艳。1.0 为中性，数值越高越鲜艳，越低越淡（0 为灰度）。采用智能曲线，避免原本鲜艳的颜色溢出，同时不改变灰色。仅影响彩色渲染。"
+
+msgid "Cancelled"
+msgstr "已取消"
+
+msgid "Cannot load content. Please check your connection."
+msgstr "无法加载内容，请检查网络连接。"
+
+msgid "Cannot load dashboard. Please check your connection."
+msgstr "无法加载首页，请检查网络连接。"
+
+msgid "Cannot load data from server. Please check your connection."
+msgstr "无法从服务器加载数据，请检查网络连接。"
+
+msgid "Cannot load image on page %1"
+msgstr "无法加载第 %1 页的图像"
+
+msgid "Cannot load next chapter: missing series info"
+msgstr "无法加载下一章：缺少系列信息"
+
+msgid "Cannot load reading list. Please check your connection."
+msgstr "无法加载阅读列表，请检查网络连接。"
+
+msgid "Cannot load reading lists. Please check your connection."
+msgstr "无法加载阅读列表，请检查网络连接。"
+
+msgid "Cannot load series details. Please check your connection."
+msgstr "无法加载系列详情，请检查网络连接。"
+
+msgid "Chapter End"
+msgstr "章节结束"
+
+msgid "Choose the background color for the image viewer."
+msgstr "选择图像查看器的背景颜色。"
+
+msgid "Choose what happens when you reach the end of a chapter: 'Stop' stays on the last page, 'Ask' shows a dialog to continue or close, 'Auto' automatically continues to the next chapter."
+msgstr "选择读到章节末尾时的行为：“停止”停留在最后一页；“询问”弹出对话框让你选择继续或关闭；“自动”自动进入下一章。"
+
+msgid "Choose what information to display in the footer."
+msgstr "选择页脚显示的信息。"
+
+msgid "Clock"
+msgstr "时钟"
+
+msgid "Color Boost"
+msgstr "色彩增强"
+
+msgid "Colors:"
+msgstr "上色："
+
+msgid "Completed"
+msgstr "已完结"
+
+msgid "Connecting to %1…"
+msgstr "正在连接 %1…"
+
+msgid "Continue Reading"
+msgstr "继续阅读"
+
+msgid "Continue to next chapter?"
+msgstr "是否继续阅读下一章？"
+
+msgid "Continuous"
+msgstr "连续模式"
+
+msgid "Controls internal rendering resolution. Low/High cap rendering based on screen size to save memory on large images. Native always uses full image resolution. Images smaller than threshold are never upscaled."
+msgstr "控制内部渲染分辨率。“低”/“高”会根据屏幕尺寸限制渲染大小，以便在大图上节省内存；“原生”始终使用完整图像分辨率。小于阈值的图像不会被放大。"
+
+msgid "Cover Art:"
+msgstr "封面："
+
+msgid "Crop Borders"
+msgstr "裁切边框"
+
+msgid "Delete Kavita server?"
+msgstr "删除 Kavita 服务器？"
+
+msgid "Dual Page Gap"
+msgstr "双页间距"
+
+msgid "Edit Kavita server"
+msgstr "编辑 Kavita 服务器"
+
+msgid "Editors:"
+msgstr "编辑："
+
+msgid "Empty search"
+msgstr "搜索内容为空"
+
+msgid "Enable or disable automatic page prefetching. When enabled, upcoming pages are loaded in the background for smooth navigation."
+msgstr "启用或禁用自动页面预取。启用后，后续页面会在后台加载，翻页更流畅。"
+
+msgid "Ended"
+msgstr "已结束"
+
+msgid "Enter title, author, tag…"
+msgstr "输入标题、作者、标签…"
+
+msgid "Failed to get continue point"
+msgstr "获取继续阅读位置失败"
+
+msgid "Failed to load next chapter"
+msgstr "加载下一章失败"
+
+msgid "Failed to load series info"
+msgstr "加载系列信息失败"
+
+msgid "Failed to mark as read"
+msgstr "标记为已读失败"
+
+msgid "Fit Height"
+msgstr "适应高度"
+
+msgid "Footer"
+msgstr "页脚"
+
+msgid "From start"
+msgstr "从头开始"
+
+msgid "Genres:"
+msgstr "类型："
+
+msgid "Hiatus"
+msgstr "休刊"
+
+msgid "In continuous view mode, sets the distance to scroll when using the up/down buttons."
+msgstr "在连续模式下，设置使用上/下按钮时的滚动距离。"
+
+msgid "In continuous view mode, sets the gap inside the viewport between stacked pages."
+msgstr "在连续模式下，设置视口内上下页面之间的间距。"
+
+msgid "In dual page mode, sets the gap between the two side-by-side pages."
+msgstr "在双页模式下，设置并排两页之间的间距。"
+
+msgid "Inks:"
+msgstr "墨线："
+
+msgid "Invalid dashboard item"
+msgstr "无效的首页项目"
+
+msgid "Invalid page number. Please enter 1 - %1"
+msgstr "页码无效，请输入 1 - %1"
+
+msgid "Invalid reading list"
+msgstr "无效的阅读列表"
+
+msgid "Jump"
+msgstr "跳转"
+
+msgid "Jump to page"
+msgstr "跳转到页面"
+
+msgid "Kavita Manga Reader"
+msgstr "Kavita 漫画阅读器"
+
+msgid "Left/Right Margin"
+msgstr "左右边距"
+
+msgid "Letters:"
+msgstr "嵌字："
+
+msgid "Loading %1…"
+msgstr "正在加载 %1…"
+
+msgid "Loading info for %1…"
+msgstr "正在加载 %1 的信息…"
+
+msgid "Loading next chapter…"
+msgstr "正在加载下一章…"
+
+msgid "Loading reading lists…"
+msgstr "正在加载阅读列表…"
+
+msgid "Loading series %1…"
+msgstr "正在加载系列 %1…"
+
+msgid "Locked"
+msgstr "锁定"
+
+msgid "Manga"
+msgstr "漫画"
+
+msgid "Mark as read"
+msgstr "标记为已读"
+
+msgid "Marked as read"
+msgstr "已标记为已读"
+
+msgid "Native"
+msgstr "原生"
+
+msgid "Newly Added"
+msgstr "最近添加"
+
+msgid "Next chapter not found"
+msgstr "未找到下一章"
+
+msgid "No results"
+msgstr "无结果"
+
+msgid "On Deck"
+msgstr "继续阅读"
+
+msgid "Ongoing"
+msgstr "连载中"
+
+msgid "Open the frontlight controls to adjust brightness and warmth."
+msgstr "打开前光控制，调节亮度和色温。"
+
+msgid "Opening chapter…"
+msgstr "正在打开章节…"
+
+msgid "Opening volume…"
+msgstr "正在打开卷…"
+
+msgid "Page Direction"
+msgstr "翻页方向"
+
+msgid "Page mode"
+msgstr "单页模式"
+
+msgid "Pencils:"
+msgstr "铅笔稿："
+
+msgid "Percentage"
+msgstr "百分比"
+
+msgid "Prefetch"
+msgstr "预取"
+
+msgid "Publishers:"
+msgstr "出版商："
+
+msgid "Reading List"
+msgstr "阅读列表"
+
+msgid "Reading Lists"
+msgstr "阅读列表"
+
+msgid "Reading order of the two halves of a split wide page. Auto follows Page Direction; LTR shows the left half first; RTL shows the right half first. Use LTR or RTL when a book is bound opposite to your page-turn direction."
+msgstr "分割宽页后两半的阅读顺序。“自动”跟随翻页方向；“左至右”先显示左半页；“右至左”先显示右半页。如果书籍装订方向与翻页方向相反，请选择“左至右”或“右至左”。"
+
+msgid "Recently Updated"
+msgstr "最近更新"
+
+msgid "Resuming %1…"
+msgstr "正在继续阅读 %1…"
+
+msgid "Screen Rotation"
+msgstr "屏幕旋转"
+
+msgid "Scroll Distance"
+msgstr "滚动距离"
+
+msgid "Search Kavita"
+msgstr "搜索 Kavita"
+
+msgid "Search failed. Please try again."
+msgstr "搜索失败，请重试。"
+
+msgid "Searching for %1…"
+msgstr "正在搜索 %1…"
+
+msgid "Series ID not available"
+msgstr "系列 ID 不可用"
+
+msgid "Series Info"
+msgstr "系列信息"
+
+msgid "Server name"
+msgstr "服务器名称"
+
+msgid "Set how the page should be resized to fit the screen. In continuous mode, only 'width' is available for consistent page alignment."
+msgstr "设置页面如何缩放以适应屏幕。在连续模式下只能使用“宽度”，以保证页面对齐一致。"
+
+msgid "Set the reading direction and page-turn direction. Also selects which half is read first when Split Direction is Auto."
+msgstr "设置阅读方向和翻页方向。当分割方向为“自动”时，也会决定先读哪一半。"
+
+msgid "Sets the margin at the bottom of the viewport."
+msgstr "设置视口底部边距。"
+
+msgid "Sets the margin at the top of the viewport."
+msgstr "设置视口顶部边距。"
+
+msgid "Sets the margin on the left and right sides of the viewport. Pages are inset from the screen edges by this amount."
+msgstr "设置视口左右两侧的边距。页面会从屏幕边缘向内缩进相应距离。"
+
+msgid "Smart Filter"
+msgstr "智能筛选"
+
+msgid "Split"
+msgstr "分割"
+
+msgid "Split Direction"
+msgstr "分割方向"
+
+msgid "Status: "
+msgstr "状态："
+
+msgid "This chapter has no pages to display"
+msgstr "本章没有可显示的页面"
+
+msgid "This volume has no chapters available."
+msgstr "本卷没有可用章节。"
+
+msgid "This volume has no pages to display"
+msgstr "本卷没有可显示的页面"
+
+msgid "Time Left"
+msgstr "剩余时间"
+
+msgid "Translators:"
+msgstr "翻译："
+
+msgid "Unknown series"
+msgstr "未知系列"
+
+msgid "Unnamed"
+msgstr "未命名"
+
+msgid "Unnamed list"
+msgstr "未命名列表"
+
+msgid "Unnamed series"
+msgstr "未命名系列"
+
+msgid "View Series"
+msgstr "查看系列"
+
+msgid "Want to Read"
+msgstr "想读"
+
+msgid "Wide Page"
+msgstr "宽页"
+
+msgid "Writers:"
+msgstr "编剧："
+
+msgid "Year: "
+msgstr "年份："
+
+msgid "You've reached the end of the series"
+msgstr "已到达系列末尾"
+
+msgid "by %1"
+msgstr "作者：%1"
+
+msgid "dual page"
+msgstr "双页"
+
+msgid "items"
+msgstr "项"
+
+msgid "reading list"
+msgstr "阅读列表"
+
+msgid "series"
+msgstr "系列"
+
+msgid "server"
+msgstr "服务器"
+
+msgid "stream"
+msgstr "内容流"
+
+msgid "unknown"
+msgstr "未知"
+
+msgid "%1h %2m"
+msgstr "%1 小时 %2 分钟"
+
+msgid "1 - %1"
+msgstr "1 - %1"
+
+msgid "- 'Fit' shows a wide (landscape) page scaled down to fit the screen- 'Split' cuts a wide page at the middle and shows each half full-size- 'Fit Height' zooms a wide page to fill the screen height; pan horizontally to read the rest (page view only)"
+msgstr "- “适应”将横向宽页缩小以适应屏幕\n- “分割”从中间切开宽页，每半页以原始大小显示\n- “适应高度”将宽页放大到填满屏幕高度，左右拖动阅读其余部分（仅单页模式）"
+
+msgid "- 'page' shows one page at a time- 'continuous' allows scrolling through pages- 'dual page' shows two pages side-by-side"
+msgstr "- “单页”一次显示一页\n- “连续”可连续滚动浏览页面\n- “双页”并排显示两页"
+
+msgid "Series"
+msgstr "系列"
+
+msgid "%1m"
+msgstr "%1分"
+
+msgid "%1s"
+msgstr "%1 秒"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Ask"
+msgstr "询问"
+
+msgid "Auto"
+msgstr "自动"
+
+msgid "Bottom Margin"
+msgstr "下边距"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Close"
+msgstr "关闭"
+
+msgid "Continue"
+msgstr "继续"
+
+msgid "Contrast"
+msgstr "对比度"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "Edit"
+msgstr "编辑"
+
+msgid "Fit"
+msgstr "适应"
+
+msgid "Frontlight"
+msgstr "前光"
+
+msgid "High"
+msgstr "高"
+
+msgid "Images"
+msgstr "图片"
+
+msgid "LTR"
+msgstr "左至右"
+
+msgid "Low"
+msgstr "低"
+
+msgid "N/A"
+msgstr "N/A"
+
+msgid "Off"
+msgstr "关闭"
+
+msgid "On"
+msgstr "打开"
+
+msgid "Page Gap"
+msgstr "页面间距"
+
+msgid "Progress"
+msgstr "进度"
+
+msgid "RTL"
+msgstr "右至左"
+
+msgid "Render Quality"
+msgstr "渲染质量"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Search"
+msgstr "搜索"
+
+msgid "Search results"
+msgstr "搜索结果"
+
+msgid "Server URL"
+msgstr "服务器 URL"
+
+msgid "Stop"
+msgstr "停止"
+
+msgid "Tags:"
+msgstr "标签："
+
+msgid "Top Margin"
+msgstr "上边距"
+
+msgid "View Mode"
+msgstr "视图模式"
+
+msgid "continuous"
+msgstr "连续"
+
+msgid "full"
+msgstr "整页"
+
+msgid "height"
+msgstr "高度"
+
+msgid "off"
+msgstr "关闭"
+
+msgid "on"
+msgstr "开启"
+
+msgid "page"
+msgstr "单页"
+
+msgid "width"
+msgstr "宽度"
+
+msgid "%1/%2 pages"
+msgstr "%1/%2 页"
+
+msgid "Volume %1"
+msgstr "第 %1 卷"
+
+msgid "Volume #%1"
+msgstr "第 %1 卷"
+
+msgid "Ch. %1"
+msgstr "第 %1 章"
+
+msgid "Special #%1"
+msgstr "特别篇 #%1"
+
+msgid "Chapter #%1"
+msgstr "第 %1 章"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Virtual Image Document"
+msgstr "虚拟图像文档"
+
+msgid "Virtual Image Collection"
+msgstr "虚拟图像合集"
+
+msgctxt "Background color"
+msgid "Black"
+msgstr "黑色"
+
+msgctxt "Background color"
+msgid "White"
+msgstr "白色"

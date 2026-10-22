@@ -1,5 +1,8 @@
 local Utils = {}
 
+local _ = require("gettext")
+local T = require("ffi/util").template
+
 local function hasWord(str, word)
     return str:find("%f[%a]" .. word .. "%f[%A]") ~= nil
 end
@@ -36,7 +39,7 @@ function Utils.joinPersonNames(persons, limit)
 end
 
 function Utils.buildVolumeTitle(dto)
-    local vol_prefix = dto.number and ("Volume " .. tostring(dto.number)) or nil
+    local vol_prefix = dto.number and T(_("Volume %1"), tostring(dto.number)) or nil
     if Utils.firstNonEmpty(dto.name) then
         local lower = dto.name:lower()
         local is_just_number = tonumber(dto.name) ~= nil and dto.name:match("^%d+$")
@@ -47,13 +50,13 @@ function Utils.buildVolumeTitle(dto)
         end
         return dto.name
     end
-    return vol_prefix or ("Volume #" .. tostring(dto.id or "?"))
+    return vol_prefix or T(_("Volume #%1"), tostring(dto.id or "?"))
 end
 
 function Utils.buildChapterTitle(dto)
-    local ch_prefix = dto.number and ("Ch. " .. tostring(dto.number)) or nil
+    local ch_prefix = dto.number and T(_("Ch. %1"), tostring(dto.number)) or nil
     if dto.isSpecial then
-        return Utils.firstNonEmpty(dto.titleName, dto.title, dto.range, "Special #" .. tostring(dto.id or "?"))
+        return Utils.firstNonEmpty(dto.titleName, dto.title, dto.range, T(_("Special #%1"), tostring(dto.id or "?")))
     end
     if Utils.firstNonEmpty(dto.titleName) then
         local lower = dto.titleName:lower()
@@ -64,11 +67,11 @@ function Utils.buildChapterTitle(dto)
         end
         return dto.titleName
     end
-    return Utils.firstNonEmpty(dto.title, dto.range, ch_prefix, "Chapter #" .. tostring(dto.id or "?"))
+    return Utils.firstNonEmpty(dto.title, dto.range, ch_prefix, T(_("Chapter #%1"), tostring(dto.id or "?")))
 end
 
 function Utils.resolveTitle(metadata, fallback_title, default)
-    default = default or "Unknown"
+    default = default or _("Unknown")
     if metadata then
         return Utils.firstNonEmpty(metadata.localizedName, fallback_title, default)
     end
