@@ -453,6 +453,12 @@ function VirtualImageDocument:detectCropBorders(physical)
 
     self._crop_cache = self._crop_cache or {}
     self._crop_cache[physical] = rect or false
+    if rect then
+        logger.dbg("VID:crop", "page", physical, "native", dims.w, "x", dims.h,
+            "rect", string.format("%d,%d %dx%d", rect.x, rect.y, rect.w, rect.h))
+    else
+        logger.dbg("VID:crop", "page", physical, "native", dims.w, "x", dims.h, "no borders")
+    end
     if not rect then return false end
 
     self:_invalidateLogicalLayout()
@@ -475,14 +481,31 @@ function VirtualImageDocument:_buildLogicalMap()
         if self.split_wide and dims.w > dims.h and dims.w >= 2 and sw >= 2 then
             local split_at = math.floor(dims.w / 2)
             split_at = math.max(sx + 1, math.min(split_at, sx + sw - 1))
-            local left_w = split_at - sx
-            local right_w = sx + sw - split_at
+            local left_x, left_w = sx, split_at - sx
+            local right_x, right_w = split_at, sx + sw - split_at
+
+            -- A detected gutter beats the geometric midpoint: two-page scans
+            -- have a blank band between the pages, and cutting at the centre
+            -- leaves half of it as a white strip on both halves.
+            local crop = self.crop_borders and self._crop_cache and self._crop_cache[physical]
+            local gutter = type(crop) == "table" and crop.gutter
+            if gutter and gutter.x1 and gutter.x2
+               and gutter.x1 > sx and gutter.x2 < sx + sw
+               and gutter.x2 - gutter.x1 >= 2 then
+                left_w = gutter.x1 - sx
+                right_x, right_w = gutter.x2, sx + sw - gutter.x2
+            end
+            if left_w < 2 or right_w < 2 then
+                left_x, left_w = sx, split_at - sx
+                right_x, right_w = split_at, sx + sw - split_at
+            end
+
             local left = {
-                physical = physical, side = "left", x = sx, y = sy,
+                physical = physical, side = "left", x = left_x, y = sy,
                 dims = Geom:new{ w = left_w, h = sh },
             }
             local right = {
-                physical = physical, side = "right", x = split_at, y = sy,
+                physical = physical, side = "right", x = right_x, y = sy,
                 dims = Geom:new{ w = right_w, h = sh },
             }
             local first_left = not self.split_rtl
