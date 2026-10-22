@@ -81,6 +81,12 @@ Access settings while reading by tapping the screen. Customize your experience:
 - **Prefetching**: Prefetch next pages for smooth reading
 - **Render Quality**: Balance between quality and speed (also helps with older devices, or crazy files)
 
+Settings are remembered **per series**: once you change something while reading a
+series, opening any chapter of it again restores that configuration. Series you
+never customized keep following the global defaults. Per-series values are
+stored in `settings/kamare_books.lua` (delete an entry, or the whole file, to
+fall back to the global defaults).
+
 <details>
 <summary><b>View all settings</b></summary>
 

@@ -26,7 +26,44 @@ local KamareOptions = {
                 default_value = 0,
                 event = "SetPageDirection",
                 args = {0, 1},
-                help_text = _([[Set page reading direction for dual page mode. LTR (Left-to-Right) for comics/webtoons, RTL (Right-to-Left) for manga.]]),
+                help_text = _([[Set the reading direction and page-turn direction. Also selects which half is read first when Split Direction is Auto.]]),
+            },
+            {
+                name = "wide_page_mode",
+                name_text = _("Wide Page"),
+                toggle = {_("Fit"), _("Split"), _("Fit Height")},
+                values = {0, 1, 2},
+                default_value = 0,
+                event = "SetWidePageMode",
+                args = {0, 1, 2},
+                enabled_func = function(configurable)
+                    return (configurable.view_mode or 0) ~= 2
+                end,
+                help_text = _([[- 'Fit' shows a wide (landscape) page scaled down to fit the screen- 'Split' cuts a wide page at the middle and shows each half full-size- 'Fit Height' zooms a wide page to fill the screen height; pan horizontally to read the rest (page view only)]]),
+            },
+            {
+                name = "split_wide_direction",
+                name_text = _("Split Direction"),
+                toggle = {_("Auto"), _("LTR"), _("RTL")},
+                values = {0, 1, 2},
+                default_value = 0,
+                event = "SetSplitWideDirection",
+                args = {0, 1, 2},
+                enabled_func = function(configurable)
+                    return (configurable.wide_page_mode or 0) == 1
+                        and (configurable.view_mode or 0) ~= 2
+                end,
+                help_text = _([[Reading order of the two halves of a split wide page. Auto follows Page Direction; LTR shows the left half first; RTL shows the right half first. Use LTR or RTL when a book is bound opposite to your page-turn direction.]]),
+            },
+            {
+                name = "crop_borders",
+                name_text = _("Crop Borders"),
+                toggle = {_("off"), _("on")},
+                values = {0, 1},
+                default_value = 0,
+                event = "SetCropBorders",
+                args = {0, 1},
+                help_text = _([[Automatically trim uniform white or black margins around page content (Mihon-style). Each page is analyzed after download; pages without uniform borders are left unchanged. Detection adds a one-time decode per page.]]),
             },
             {
                 name = "page_gap_height",

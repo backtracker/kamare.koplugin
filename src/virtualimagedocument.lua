@@ -25,9 +25,11 @@ local logger = require("logger")
 local Blitbuffer = require("ffi/blitbuffer")
 local TileCacheItem = require("document/tilecacheitem")
 local mupdf = require("ffi/mupdf")
+local CropBorders = require("cropborders")
 local VIDCache = require("virtualimagedocumentcache")
 local time = require("ui/time")
 local ffi = require("ffi")
+local _ = require("gettext")
 
 local DEFAULT_PAGE_WIDTH = 800
 local DEFAULT_PAGE_HEIGHT = 1200
@@ -168,7 +170,7 @@ local VirtualImageDocument = Document:extend{
     provider = "virtualimagedocument",
     provider_name = "Virtual Image Document",
 
-    title = "Virtual Image Document",
+    title = _("Virtual Image Document"),
 
     images_list = nil,
     images_dimensions = nil,
@@ -205,6 +207,22 @@ local VirtualImageDocument = Document:extend{
     _dual_page_layout = nil, -- Pre-calculated layout: [page_num] = {left, right}
     _dual_page_pairs = nil, -- Pre-calculated pairs array: [index] = {left, right}
     content_type = "auto", -- "auto", "volume", or "chapter"
+
+    -- Wide-page splitting. `_pages` and every cache key stay physical; the
+    -- logical map is the only place halves exist. A wide spread becomes two
+    -- logical pages sharing one physical source, one fetch, and one tile set.
+    split_wide = false,
+    split_rtl = false,
+    _logical_map = nil,
+    _logical_count = 0,
+    _layout_entries = nil,
+    _layout_entries_gen = -1,
+
+    -- Border cropping. `_crop_cache[physical]` is a content rect in native
+    -- source coordinates, or `false` once detection found nothing to crop.
+    -- nil means detection has not run for that page yet.
+    crop_borders = false,
+    _crop_cache = nil,
 
     tile_px = TILE_SIZE_PX, -- default tile size (px)
 
@@ -328,7 +346,7 @@ function VirtualImageDocument:init()
     self.info.configurable = false
 
     -- Add metadata for statistics compatibility
-    self.info.title = self.title or "Virtual Image Document"
+    self.info.title = self.title or _("Virtual Image Document")
     self.info.authors = (self.metadata and self.metadata.author) or ""
     self.info.series = (self.metadata and self.metadata.seriesName) or ""
     self.is_pic = false
@@ -336,6 +354,8 @@ function VirtualImageDocument:init()
     self.tile_cache_validity_ts = os.time()
 
     self:updateColorRendering()
+
+    self:_invalidateLogicalLayout()
 
     if self._pages > 0 then
         self:_buildDualPageLayout()
@@ -353,6 +373,8 @@ function VirtualImageDocument:close()
     self._orientation_cache = nil
     self._prefetched_raw = nil
     self._fully_cached_pages = nil
+    self._logical_map = nil
+    self._layout_entries = nil
     return true
 end
 
@@ -362,6 +384,193 @@ function VirtualImageDocument:_getDimsWithDefault(pageno)
         return dims
     end
     return Geom:new{ w = DEFAULT_PAGE_WIDTH, h = DEFAULT_PAGE_HEIGHT }
+end
+
+-- Invalidating the logical map also drops the derived layout entries; the
+-- caller must bump _vh_gen so the getVirtualHeight memo is discarded too.
+function VirtualImageDocument:_invalidateLogicalLayout()
+    self._logical_map = nil
+    self._logical_count = 0
+    self._layout_entries = nil
+    self._layout_entries_gen = -1
+end
+
+function VirtualImageDocument:setCropBorders(enabled)
+    enabled = enabled and true or false
+    if self.crop_borders == enabled then return false end
+    self.crop_borders = enabled
+    self:_invalidateLogicalLayout()
+    self._vh_gen = (self._vh_gen or 0) + 1
+    self._vh_cache_key = nil
+    return true
+end
+
+-- The content rect of a physical page in native coordinates. Falls back to
+-- the full page when cropping is off, undetected, or found nothing.
+function VirtualImageDocument:_getSourceRect(physical)
+    local dims = self:_getDimsWithDefault(physical)
+    local crop = self.crop_borders and self._crop_cache and self._crop_cache[physical]
+    if crop and crop.w > 0 and crop.h > 0 then
+        return crop.x, crop.y, crop.w, crop.h
+    end
+    return 0, 0, dims.w, dims.h
+end
+
+-- True when border cropping is on but this physical page has not been
+-- analyzed yet. false is a valid cached result ("no borders found").
+function VirtualImageDocument:needsCropDetection(physical)
+    if not self.crop_borders then return false end
+    return not self._crop_cache or self._crop_cache[physical] == nil
+end
+
+function VirtualImageDocument:getCropRect(physical)
+    if not self.crop_borders then return nil end
+    local rect = self._crop_cache and self._crop_cache[physical]
+    if rect and rect.w > 0 and rect.h > 0 then return rect end
+    return nil
+end
+
+-- Analyze the raw image and cache its content rect. Must run while the raw
+-- body is still available (before _preSplitPageTiles drops it). Returns true
+-- when a crop rect was found and page layout changed.
+function VirtualImageDocument:detectCropBorders(physical)
+    if not self.crop_borders then return false end
+    if self._crop_cache and self._crop_cache[physical] ~= nil then
+        return false
+    end
+
+    local raw_data = self:_getRawImageData(physical)
+    if not raw_data then return false end
+    -- Layout (and therefore rendering) already falls back to the default
+    -- dimensions, so detection must use the same space or its rect won't map.
+    local dims = self:_getDimsWithDefault(physical)
+
+    local ok, rect = pcall(CropBorders.detect, raw_data, dims.w, dims.h)
+    if not ok then
+        logger.warn("VID:detectCropBorders failed", "page", physical, "error", rect)
+        rect = nil
+    end
+
+    self._crop_cache = self._crop_cache or {}
+    self._crop_cache[physical] = rect or false
+    if not rect then return false end
+
+    self:_invalidateLogicalLayout()
+    self._vh_gen = (self._vh_gen or 0) + 1
+    self._vh_cache_key = nil
+    return true
+end
+
+-- Build the logical page sequence. A wide physical page becomes two entries
+-- ordered by the explicit split direction: LTR left->right, RTL right->left.
+-- Non-wide pages stay one entry. Every entry carries its crop window in
+-- physical coordinates (x/y) plus its own display dims. Splitting is decided
+-- from the physical page (so border cropping cannot change navigation parity),
+-- then the physical midpoint is mapped into the cropped content rect.
+function VirtualImageDocument:_buildLogicalMap()
+    local map = {}
+    for physical = 1, self._pages do
+        local dims = self:_getDimsWithDefault(physical)
+        local sx, sy, sw, sh = self:_getSourceRect(physical)
+        if self.split_wide and dims.w > dims.h and dims.w >= 2 and sw >= 2 then
+            local split_at = math.floor(dims.w / 2)
+            split_at = math.max(sx + 1, math.min(split_at, sx + sw - 1))
+            local left_w = split_at - sx
+            local right_w = sx + sw - split_at
+            local left = {
+                physical = physical, side = "left", x = sx, y = sy,
+                dims = Geom:new{ w = left_w, h = sh },
+            }
+            local right = {
+                physical = physical, side = "right", x = split_at, y = sy,
+                dims = Geom:new{ w = right_w, h = sh },
+            }
+            local first_left = not self.split_rtl
+            if first_left then
+                map[#map + 1] = left
+                map[#map + 1] = right
+            else
+                map[#map + 1] = right
+                map[#map + 1] = left
+            end
+        else
+            map[#map + 1] = {
+                physical = physical, side = nil, x = sx, y = sy,
+                dims = Geom:new{ w = sw, h = sh },
+            }
+        end
+    end
+    self._logical_map = map
+    self._logical_count = #map
+    return map
+end
+
+function VirtualImageDocument:_ensureLogicalMap()
+    return self._logical_map or self:_buildLogicalMap()
+end
+
+function VirtualImageDocument:_logicalEntry(pageno)
+    local map = self:_ensureLogicalMap()
+    return map[pageno]
+end
+
+-- Public split control. Direction is part of the map because it determines
+-- which half is the "first" logical page; changing it while preserving the
+-- physical page + half is the viewer's job.
+function VirtualImageDocument:setPageSplit(enabled, rtl)
+    enabled = enabled and true or false
+    rtl = rtl and true or false
+    if self.split_wide == enabled and self.split_rtl == rtl then
+        return false
+    end
+    self.split_wide = enabled
+    self.split_rtl = rtl
+    self:_invalidateLogicalLayout()
+    self._vh_gen = (self._vh_gen or 0) + 1
+    self._vh_cache_key = nil
+    return true
+end
+
+function VirtualImageDocument:isPageSplitEnabled()
+    return self.split_wide
+end
+
+function VirtualImageDocument:getPhysicalPage(pageno)
+    local entry = self:_logicalEntry(pageno)
+    return entry and entry.physical or pageno
+end
+
+function VirtualImageDocument:getLogicalPosition(pageno)
+    local entry = self:_logicalEntry(pageno)
+    if not entry then return nil, nil end
+    return entry.physical, entry.side
+end
+
+-- Logical index of the first half of `physical` (or of the requested side).
+-- Used to map Kavita's physical start page and to preserve position across
+-- split/direction changes.
+function VirtualImageDocument:getLogicalPageForPhysical(physical, side)
+    local map = self:_ensureLogicalMap()
+    local fallback
+    for i, entry in ipairs(map) do
+        if entry.physical == physical then
+            fallback = fallback or i
+            if not side or entry.side == side then
+                return i
+            end
+        end
+    end
+    return fallback or math.max(1, math.min(physical or 1, #map))
+end
+
+function VirtualImageDocument:getLogicalPageCount()
+    return #self:_ensureLogicalMap()
+end
+
+function VirtualImageDocument:_physicalIsLandscape(pageno)
+    if pageno < 1 or pageno > self._pages then return false end
+    local dims = self._dims_cache and self._dims_cache[pageno]
+    return dims and dims.w > dims.h or false
 end
 
 function VirtualImageDocument:_storeDims(pageno, w, h)
@@ -383,6 +592,8 @@ function VirtualImageDocument:_storeDims(pageno, w, h)
     end
     self._dims_cache[pageno] = Geom:new{ w = w, h = h }
     self._orientation_cache[pageno] = (w > h) and 1 or 0
+    -- A late dimension update can turn a page wide, changing logical count.
+    self:_invalidateLogicalLayout()
     -- Invalidate the getVirtualHeight memo: a page's dims changed in a
     -- way that could affect the aggregate height.
     self._vh_gen = self._vh_gen + 1
@@ -422,37 +633,40 @@ end
 
 function VirtualImageDocument:getDocumentProps()
     return {
-        title = "Virtual Image Collection",
+        title = _("Virtual Image Collection"),
         pages = self._pages,
     }
 end
 
 function VirtualImageDocument:getPageCount()
+    return #self:_ensureLogicalMap()
+end
+
+function VirtualImageDocument:getPhysicalPageCount()
     return self._pages
 end
 
 function VirtualImageDocument:getNativePageDimensions(pageno)
-    if pageno < 1 or pageno > self._pages then
-        logger.warn("VID:getNativePageDimensions invalid", "page", pageno, "valid", 1, self._pages)
+    local entry = self:_logicalEntry(pageno)
+    if not entry then
+        logger.warn("VID:getNativePageDimensions invalid", "page", pageno, "valid", 1,
+            self:getPageCount())
         return Geom:new{ w = 0, h = 0 }
     end
-
-    local cached = self._dims_cache and self._dims_cache[pageno]
-    if cached then
-        return cached
-    end
-
-    self:validateDims(pageno)
-    cached = self._dims_cache and self._dims_cache[pageno]
-    if cached then
-        return cached
-    end
-
-    return Geom:new{ w = DEFAULT_PAGE_WIDTH, h = DEFAULT_PAGE_HEIGHT }
+    return entry.dims
 end
 
 function VirtualImageDocument:getPageOrientation(pageno)
-    return (self._orientation_cache and self._orientation_cache[pageno]) or 0
+    local entry = self:_logicalEntry(pageno)
+    if not entry then return 0 end
+    return (entry.dims.w > entry.dims.h) and 1 or 0
+end
+
+-- True when this logical page uses an automatically zoomed wide-page view.
+-- The viewer asks this instead of re-deriving native orientation.
+function VirtualImageDocument:isLogicalPageWide(pageno)
+    local entry = self:_logicalEntry(pageno)
+    return entry and entry.side == nil and entry.dims.w > entry.dims.h or false
 end
 
 function VirtualImageDocument:getDualPageOffset()
@@ -467,11 +681,11 @@ function VirtualImageDocument:getDualPageOffset()
         return 0
     end
 
-    -- Scan ALL pages for landscape spreads (merged pages)
+    -- Scan ALL physical pages for landscape spreads (merged pages)
     -- In physical books, spreads ALWAYS start at even pages
     -- If first spread is at odd position, we need offset=1 to shift it to even
     for page = 2, self._pages do
-        if self:getPageOrientation(page) == 1 then
+        if self:_physicalIsLandscape(page) then
             if (page % 2) == 0 then
                 self._dual_page_offset = 0
 
@@ -503,7 +717,7 @@ function VirtualImageDocument:_buildDualPageLayout()
     local function is_landscape(page)
         if page < 1 or page > page_count then return false end
 
-        return self:getPageOrientation(page) == 1
+        return self:_physicalIsLandscape(page)
     end
 
     local function record(pair_idx, page)
@@ -625,9 +839,10 @@ function VirtualImageDocument:preloadDimensions(list)
 end
 
 function VirtualImageDocument:validateDims(pageno)
-    if pageno < 1 or pageno > self._pages then return end
+    local entry = self:_logicalEntry(pageno)
+    if not entry then return end
     self._dims_cache = self._dims_cache or {}
-    local cached = self._dims_cache[pageno]
+    local cached = self._dims_cache[entry.physical]
     if not (cached and isPositiveDimension(cached.w, cached.h)) then
         logger.warn("VirtualImageDocument: missing or invalid dims for page", pageno)
     end
@@ -651,7 +866,42 @@ function VirtualImageDocument:getPageBBox(pageno)
     }
 end
 
--- Layout projection methods (pure; see file header).
+-- Layout projection methods (pure; see file header). All of them iterate the
+-- logical sequence, not physical pages. Entries are cached until dimensions or
+-- the split map change; `gap_before` is false between the two halves of one
+-- spread so continuous mode renders them as one uninterrupted image.
+
+function VirtualImageDocument:_getLayoutEntries()
+    local map = self:_ensureLogicalMap()
+    local gen = self._vh_gen or 0
+    if self._layout_entries and self._layout_entries_gen == gen then
+        return self._layout_entries
+    end
+
+    local entries = {}
+    local prev_physical, prev_side
+    for i = 1, #map do
+        local e = map[i]
+        local dims = e.dims
+        if dims and isPositiveDimension(dims.w, dims.h) then
+            local same_spread = prev_physical == e.physical
+                and prev_side ~= nil and e.side ~= nil
+            entries[#entries + 1] = {
+                page_num = i,
+                physical_page = e.physical,
+                side = e.side,
+                native_w = dims.w,
+                native_h = dims.h,
+                gap_before = (#entries > 0) and not same_spread,
+            }
+            prev_physical = e.physical
+            prev_side = e.side
+        end
+    end
+    self._layout_entries = entries
+    self._layout_entries_gen = gen
+    return entries
+end
 
 function VirtualImageDocument:getVirtualHeight(zoom, zoom_mode, viewport_width, page_gap_height)
     zoom = zoom or 1.0
@@ -668,17 +918,12 @@ function VirtualImageDocument:getVirtualHeight(zoom, zoom_mode, viewport_width, 
     end
 
     local total = 0
-    local valid_count = 0
-    for i = 1, self._pages do
-        local dims = self._dims_cache[i]
-        if dims and isPositiveDimension(dims.w, dims.h) then
-            total = total + pageDisplayHeight(dims.w, dims.h,
-                                              zoom_mode, viewport_width, zoom)
-            valid_count = valid_count + 1
+    for _, entry in ipairs(self:_getLayoutEntries()) do
+        if entry.gap_before and page_gap_height > 0 then
+            total = total + page_gap_height
         end
-    end
-    if valid_count > 1 then
-        total = total + (valid_count - 1) * page_gap_height
+        total = total + pageDisplayHeight(entry.native_w, entry.native_h,
+                                          zoom_mode, viewport_width, zoom)
     end
 
     self._vh_cache_key = key
@@ -701,49 +946,45 @@ function VirtualImageDocument:getVisiblePagesAtOffset(offset_y, viewport_height,
     local result = {}
     local bottom = offset_y + viewport_height
     local accumulated_offset = 0
-    local seen_valid = false
 
-    for i = 1, self._pages do
-        local dims = self._dims_cache[i]
-        if dims and isPositiveDimension(dims.w, dims.h) then
-            local native_w, native_h = dims.w, dims.h
+    for _, entry in ipairs(self:_getLayoutEntries()) do
+        local native_w, native_h = entry.native_w, entry.native_h
 
-            -- Per-page zoom: in fit-width, each page zooms to fit viewport_w.
-            local page_zoom = zoom
-            if zoom_mode == 1 and viewport_width and viewport_width > 0 and native_w > 0 then
-                page_zoom = viewport_width / native_w
-            end
+        -- Per-page zoom: in fit-width, each page zooms to fit viewport_w.
+        local page_zoom = zoom
+        if zoom_mode == 1 and viewport_width and viewport_width > 0 and native_w > 0 then
+            page_zoom = viewport_width / native_w
+        end
 
-            -- Inter-page gap is inserted BEFORE every valid page except the
-            -- first. Must match getVirtualHeight / getScrollPositionForPage.
-            if seen_valid and page_gap_height > 0 then
-                accumulated_offset = accumulated_offset + page_gap_height
-            end
+        if entry.gap_before and page_gap_height > 0 then
+            accumulated_offset = accumulated_offset + page_gap_height
+        end
 
-            local page_top = accumulated_offset
-            local page_height = native_h * page_zoom
-            local page_bottom = page_top + page_height
-            accumulated_offset = page_bottom
-            seen_valid = true
+        local page_top = accumulated_offset
+        local page_height = native_h * page_zoom
+        local page_bottom = page_top + page_height
+        accumulated_offset = page_bottom
 
-            -- Early-exit once we're past the viewport.
-            if page_top > bottom then break end
+        -- Early-exit once we're past the viewport.
+        if page_top > bottom then break end
 
-            if page_bottom >= offset_y and page_top <= bottom then
-                table.insert(result, {
-                    page_num = i,
-                    page_top = page_top,
-                    page_bottom = page_bottom,
-                    visible_top = math.max(page_top, offset_y),
-                    visible_bottom = math.min(page_bottom, bottom),
-                    layout = {
-                        page_num = i,
-                        native_width = native_w,
-                        native_height = native_h,
-                    },
-                    zoom = page_zoom,
-                })
-            end
+        if page_bottom >= offset_y and page_top <= bottom then
+            table.insert(result, {
+                page_num = entry.page_num,
+                physical_page = entry.physical_page,
+                side = entry.side,
+                gap_before = entry.gap_before,
+                page_top = page_top,
+                page_bottom = page_bottom,
+                visible_top = math.max(page_top, offset_y),
+                visible_bottom = math.min(page_bottom, bottom),
+                layout = {
+                    page_num = entry.page_num,
+                    native_width = native_w,
+                    native_height = native_h,
+                },
+                zoom = page_zoom,
+            })
         end
     end
 
@@ -755,27 +996,20 @@ function VirtualImageDocument:getScrollPositionForPage(pageno, zoom, zoom_mode, 
     page_gap_height = math.max(0, tonumber(page_gap_height) or 0)
     if pageno < 1 or not self._dims_cache then return 0 end
 
-    -- Iterate pages 1..pageno (inclusive). For each valid page after the
-    -- first, insert a gap BEFORE it. Stop and return the accumulated offset
-    -- when we reach pageno (without adding pageno's own height); if pageno
-    -- is past the end of the document, the loop exits and returns the total
-    -- virtual height (matching getVirtualHeight for pageno > _pages).
+    -- For each entry before pageno, add its gap (if any) and height. pageno's
+    -- own gap is included but not its height. Past the end this returns the
+    -- total virtual height, matching getVirtualHeight.
     local accumulated_offset = 0
-    local seen_valid = false
-    for i = 1, math.min(pageno, self._pages) do
-        local dims = self._dims_cache[i]
-        if dims and isPositiveDimension(dims.w, dims.h) then
-            if seen_valid and page_gap_height > 0 then
-                accumulated_offset = accumulated_offset + page_gap_height
-            end
-            if i == pageno then
-                return accumulated_offset
-            end
-            accumulated_offset = accumulated_offset
-                + pageDisplayHeight(dims.w, dims.h,
-                                    zoom_mode, viewport_width, zoom)
-            seen_valid = true
+    for _, entry in ipairs(self:_getLayoutEntries()) do
+        if entry.gap_before and page_gap_height > 0 then
+            accumulated_offset = accumulated_offset + page_gap_height
         end
+        if entry.page_num == pageno then
+            return accumulated_offset
+        end
+        accumulated_offset = accumulated_offset
+            + pageDisplayHeight(entry.native_w, entry.native_h,
+                                zoom_mode, viewport_width, zoom)
     end
     return accumulated_offset
 end
@@ -787,26 +1021,23 @@ function VirtualImageDocument:getPageAtOffset(offset_y, zoom, zoom_mode, viewpor
     if not self._dims_cache then return 1 end
 
     local accumulated_offset = 0
-    local seen_valid = false
-    for i = 1, self._pages do
-        local dims = self._dims_cache[i]
-        if dims and isPositiveDimension(dims.w, dims.h) then
-            if seen_valid and page_gap_height > 0 then
-                accumulated_offset = accumulated_offset + page_gap_height
-            end
-            local page_height = pageDisplayHeight(dims.w, dims.h,
-                                                  zoom_mode, viewport_width, zoom)
-            local page_top = accumulated_offset
-            local page_bottom = page_top + page_height
-            if offset_y >= page_top and offset_y < page_bottom then
-                return i
-            end
-            accumulated_offset = page_bottom
-            seen_valid = true
+    local last_page = 1
+    for _, entry in ipairs(self:_getLayoutEntries()) do
+        if entry.gap_before and page_gap_height > 0 then
+            accumulated_offset = accumulated_offset + page_gap_height
         end
+        local page_height = pageDisplayHeight(entry.native_w, entry.native_h,
+                                              zoom_mode, viewport_width, zoom)
+        local page_top = accumulated_offset
+        local page_bottom = page_top + page_height
+        if offset_y >= page_top and offset_y < page_bottom then
+            return entry.page_num
+        end
+        accumulated_offset = page_bottom
+        last_page = entry.page_num
     end
 
-    return self._pages
+    return last_page
 end
 
 function VirtualImageDocument:_computeTileRects(rect, tile_px)
@@ -875,14 +1106,33 @@ function VirtualImageDocument:_estimateTileBytes(rect, render_w, render_h)
     return bytes
 end
 
--- Total byte cost of all tiles needed to fully cover `pageno` at the given
--- render dimensions. Used by the prefetch budget to size upcoming pages.
+-- Logical render dims describe one half (or one normal page). The tile cache
+-- is keyed by the full physical source, so convert the half's render scale to
+-- the full-source render space. Splitting therefore decodes/renders the full
+-- spread once, at the resolution needed by the enlarged half.
+function VirtualImageDocument:_fullRenderDimsForPage(pageno, render_w, render_h)
+    local entry = self:_logicalEntry(pageno)
+    if not entry then return nil end
+    local physical = self:_getDimsWithDefault(entry.physical)
+    local lw, lh = entry.dims.w, entry.dims.h
+    if lw <= 0 or lh <= 0 then return nil end
+    render_w = render_w or lw
+    render_h = render_h or lh
+    local full_w = math.max(1, math.floor(physical.w * (render_w / lw) + 0.5))
+    local full_h = math.max(1, math.floor(physical.h * (render_h / lh) + 0.5))
+    return entry, physical, full_w, full_h
+end
+
+-- Total byte cost of all tiles needed to fully cover the physical source
+-- behind `pageno` at the given logical render dimensions. Used by the
+-- prefetch budget to size upcoming pages. Both halves report the same bytes;
+-- the viewer deduplicates by physical page.
 function VirtualImageDocument:estimateBytesForPage(pageno, render_w, render_h)
     if not self._dims_cache then return 0 end
-    local native = self._dims_cache[pageno]
-    if not native or native.w <= 0 or native.h <= 0 then return 0 end
-    local rect = Geom:new{ x = 0, y = 0, w = render_w, h = render_h }
-    return self:_estimateTileBytes(rect, render_w, render_h)
+    local _, _, full_w, full_h = self:_fullRenderDimsForPage(pageno, render_w, render_h)
+    if not full_w then return 0 end
+    local rect = Geom:new{ x = 0, y = 0, w = full_w, h = full_h }
+    return self:_estimateTileBytes(rect, full_w, full_h)
 end
 
 -- Byte cost of the tiles intersecting a sub-rect of `pageno`. Used to size
@@ -891,24 +1141,38 @@ end
 -- where the visible slice is a small fraction of the page.
 function VirtualImageDocument:estimateBytesForRect(pageno, rect, render_w, render_h)
     if not self._dims_cache then return 0 end
-    local native = self._dims_cache[pageno]
-    if not native or native.w <= 0 or native.h <= 0 then return 0 end
-    return self:_estimateTileBytes(rect, render_w, render_h)
+    local entry, physical, full_w, full_h = self:_fullRenderDimsForPage(pageno, render_w, render_h)
+    if not entry then return 0 end
+    local scale_x = full_w / physical.w
+    local scale_y = full_h / physical.h
+    local full_rect = Geom:new{
+        x = math.floor((entry.x + (rect.x or 0)) * scale_x),
+        y = math.floor(((entry.y or 0) + (rect.y or 0)) * scale_y),
+        w = math.max(1, math.floor((rect.w or entry.dims.w) * scale_x)),
+        h = math.max(1, math.floor((rect.h or entry.dims.h) * scale_y)),
+    }
+    return self:_estimateTileBytes(full_rect, full_w, full_h)
 end
 
--- Whether every tile for `pageno` is currently in the cache. Updated by
--- _preSplitPageTiles on success and cleared on tile eviction (via the onFree
--- callback). Best-effort: the prefetch budget reads this to skip pages that
--- already occupy the cache without doing per-tile hash probes.
+-- Whether every tile for the physical source behind `pageno` is currently in
+-- the cache. Updated by _preSplitPageTiles on success and cleared on tile
+-- eviction (via the onFree callback). Best-effort: the prefetch budget reads
+-- this to skip pages that already occupy the cache without doing per-tile
+-- hash probes.
 function VirtualImageDocument:isPageFullyCached(pageno)
     if not self._fully_cached_pages then return false end
-    return self._fully_cached_pages[pageno] == true
+    local physical = self:getPhysicalPage(pageno)
+    return self._fully_cached_pages[physical] == true
 end
 
--- Hash key for a tile. Cached prefix per (pageno, gamma, render_quality);
--- only the per-tile rect coordinates are appended per call.
-function VirtualImageDocument:_tileHash(pageno, zoom, gamma, rect, render_quality)
-    local prefix = self:_tileHashPrefix(pageno, gamma, render_quality)
+-- Hash key for a tile. Cached prefix per (pageno, gamma, render_quality,
+-- render dims); only the per-tile rect coordinates are appended per call.
+-- Render dims are part of the key because the same physical source is decoded
+-- at different resolutions depending on wide-page split (a half asks for
+-- full-source dims ~2x the unsplit cap). Without them a split toggle could
+-- reuse undersized tiles and leave blank strips.
+function VirtualImageDocument:_tileHash(pageno, zoom, gamma, rect, render_quality, render_w, render_h)
+    local prefix = self:_tileHashPrefix(pageno, gamma, render_quality, render_w, render_h)
     return prefix
         .. "|" .. math.floor(rect.x or 0)
         .. "|" .. math.floor(rect.y or 0)
@@ -920,10 +1184,13 @@ end
 -- _preSplitPageTiles) hit the same (pageno, gamma, render_quality) for
 -- every tile in a paint; this avoids re-canonicalizing file, mod_time,
 -- render_mode, color, etc. per tile.
-function VirtualImageDocument:_tileHashPrefix(pageno, gamma, render_quality)
+function VirtualImageDocument:_tileHashPrefix(pageno, gamma, render_quality, render_w, render_h)
     local qg = math.floor((gamma or 1) * 1000 + 0.5)
     local qs = math.floor((self.saturation or 1) * 1000 + 0.5)
+    local rw = render_w and math.floor(render_w + 0.5) or -1
+    local rh = render_h and math.floor(render_h + 0.5) or -1
     local cache_key = (pageno or 0) .. "|" .. qg .. "|" .. qs .. "|" .. (render_quality or -1)
+        .. "|" .. rw .. "|" .. rh
     if self._tile_hash_cache_key == cache_key
        and self._tile_hash_cache_file == (self.file or "")
        and self._tile_hash_cache_mod  == (self.mod_time or 0)
@@ -941,6 +1208,8 @@ function VirtualImageDocument:_tileHashPrefix(pageno, gamma, render_quality)
         tostring(self.render_mode or 0),
         self.render_color and "color" or "bw",
         tostring(render_quality or -1),
+        tostring(rw),
+        tostring(rh),
     }, "|")
     self._tile_hash_cache_key = cache_key
     self._tile_hash_cache_file = self.file or ""
@@ -1165,12 +1434,18 @@ function VirtualImageDocument:drawPage(target, x, y, rect, pageno, zoom, page_mo
 end
 
 function VirtualImageDocument:prefetchPage(page, zoom, page_mode, render_w, render_h, render_quality)
-    return self:_preSplitPageTiles(page, zoom, nil, page_mode, render_w, render_h, render_quality)
+    local _, _, full_w, full_h = self:_fullRenderDimsForPage(page, render_w, render_h)
+    if not full_w then return 0 end
+    local physical = self:getPhysicalPage(page)
+    return self:_preSplitPageTiles(physical, zoom, nil, page_mode,
+                                   full_w, full_h, render_quality)
 end
 
+-- `pageno` here is always a physical page: tiles are cached in full-source
+-- coordinates so both logical halves share one decode and one tile set.
 function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, tile_px, page_mode, render_w, render_h, render_quality)
     local t0 = time.now()
-    local native = self:getNativePageDimensions(pageno)
+    local native = self:_getDimsWithDefault(pageno)
     if not native or native.w <= 0 or native.h <= 0 then return 0 end
 
     if not render_w or not render_h then
@@ -1191,7 +1466,7 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, tile_px, page_mod
     local missing = {}
 
     for _, t in ipairs(tiles) do
-        local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality)
+        local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality, render_w, render_h)
         local exists = VIDCache:getNativeTile(key)
         if not (exists and exists.bb) then
             table.insert(missing, t)
@@ -1266,7 +1541,7 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, tile_px, page_mod
             tile.render_scale_y = render_scale_y
             tile.onFree = createTileFreeCallback(self, pageno)
 
-            local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality)
+            local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality, render_w, render_h)
             VIDCache:setNativeTile(key, tile, tile.size)
 
             tiles_generated = tiles_generated + 1
@@ -1296,33 +1571,40 @@ end
 
 function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, tile_px, prefetch_rows, page_mode, render_w, render_h, render_quality)
     local t0 = time.now()
-    local native = self:getNativePageDimensions(pageno)
+    local entry, physical_dims, full_render_w, full_render_h =
+        self:_fullRenderDimsForPage(pageno, render_w, render_h)
 
-    if not native or native.w <= 0 or native.h <= 0 then
-        logger.warn("VID:drawPageTiled invalid page dimensions", "page", pageno)
+    if not entry then
+        logger.warn("VID:drawPageTiled invalid page", "page", pageno)
         return false
     end
 
-    if not render_w or not render_h then
-        logger.warn("VID:drawPageTiled missing render dims", "page", pageno)
-        render_w, render_h = native.w, native.h
-    end
-    local render_scale_x = render_w / native.w
-    local render_scale_y = render_h / native.h
+    local native_w, native_h = entry.dims.w, entry.dims.h
+
+    -- `rect` is in logical (half) coordinates; the tile space is the full
+    -- physical source. Shift the crop window to the half's x offset, then
+    -- scale into full-render coordinates.
+    local render_scale_x = full_render_w / physical_dims.w
+    local render_scale_y = full_render_h / physical_dims.h
+    local start_x = math.max(0, rect.x or 0)
+    local end_x = math.min(native_w, (rect.x or 0) + (rect.w or native_w))
     local start_y = math.max(0, rect.y or 0)
-    local end_y = math.min(native.h, (rect.y or 0) + (rect.h or 0))
+    local end_y = math.min(native_h, (rect.y or 0) + (rect.h or native_h))
+    local clamped_w = math.max(0, end_x - start_x)
     local clamped_h = math.max(0, end_y - start_y)
 
-    if clamped_h <= 0 then
-        logger.warn("VID:drawPageTiled rect completely outside page bounds", "page", pageno, "rect_y", rect.y, "rect_h", rect.h, "native_h", native.h)
+    if clamped_w <= 0 or clamped_h <= 0 then
+        logger.warn("VID:drawPageTiled rect completely outside page bounds",
+            "page", pageno, "rect_x", rect.x, "rect_y", rect.y,
+            "rect_w", rect.w, "rect_h", rect.h, "native", native_w, native_h)
         return true
     end
 
     local base_rect = Geom:new{
-        x = math.floor((rect.x or 0) * render_scale_x),
-        y = math.floor(start_y * render_scale_y),
-        w = math.floor(math.min(rect.w or native.w, native.w) * render_scale_x),
-        h = math.floor(clamped_h * render_scale_y),
+        x = math.floor((entry.x + start_x) * render_scale_x),
+        y = math.floor(((entry.y or 0) + start_y) * render_scale_y),
+        w = math.max(1, math.floor(clamped_w * render_scale_x)),
+        h = math.max(1, math.floor(clamped_h * render_scale_y)),
     }
 
     local tp = math.max(16, tonumber(tile_px or self.tile_px or TILE_SIZE_PX))
@@ -1333,7 +1615,7 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
     if rows > 0 then
         local pad = rows * tp
         local y0 = math.max(0, base_rect.y - pad)
-        local y1 = math.min(render_h, base_rect.y + base_rect.h + pad)
+        local y1 = math.min(full_render_h, base_rect.y + base_rect.h + pad)
         prefetch_rect = Geom:new{
             x = base_rect.x,
             y = y0,
@@ -1342,11 +1624,13 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
         }
     end
 
+    local physical = entry.physical
     local tiles = self:_computeTileRects(prefetch_rect, tp)
     local any_missing = false
 
     for _, t in ipairs(tiles) do
-        local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality)
+        local key = self:_tileHash(physical, zoom, self.gamma, t, render_quality,
+                                   full_render_w, full_render_h)
         if not VIDCache:getNativeTile(key) then
             any_missing = true
             break
@@ -1354,8 +1638,8 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
     end
 
     if any_missing then
-        local gen = self:_preSplitPageTiles(pageno, zoom, tile_px, page_mode,
-                                             render_w, render_h, render_quality)
+        local gen = self:_preSplitPageTiles(physical, zoom, tile_px, page_mode,
+                                             full_render_w, full_render_h, render_quality)
         if gen == "pending" then
             -- Body not available yet (page wasn't prefetched). Tell the caller
             -- (canvas) to paint a placeholder and request the page async; do
@@ -1374,7 +1658,8 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
     local tiles_rendered = 0
     local ok = pcall(function()
         for i, t in ipairs(tiles) do
-            local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality)
+            local key = self:_tileHash(physical, zoom, self.gamma, t, render_quality,
+                                       full_render_w, full_render_h)
             local ttile = VIDCache:getNativeTile(key)
             if ttile and ttile.bb then
                 local tile_bb = ttile.bb
@@ -1424,13 +1709,13 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
         assembled_bb:free()
     end
     if not ok then
-        logger.dbg(string.format("[kamare:render] page=%d miss=%s tiles_rendered=%d ASSEMBLE-FAIL %dms",
-            pageno, tostring(any_missing), tiles_rendered, time.to_ms(time.now() - t0)))
+        logger.dbg(string.format("[kamare:render] page=%d physical=%d miss=%s tiles_rendered=%d ASSEMBLE-FAIL %dms",
+            pageno, physical, tostring(any_missing), tiles_rendered, time.to_ms(time.now() - t0)))
         return false
     end
 
-    logger.dbg(string.format("[kamare:render] page=%d miss=%s tiles_rendered=%d %dms",
-        pageno, tostring(any_missing), tiles_rendered, time.to_ms(time.now() - t0)))
+    logger.dbg(string.format("[kamare:render] page=%d physical=%d miss=%s tiles_rendered=%d %dms",
+        pageno, physical, tostring(any_missing), tiles_rendered, time.to_ms(time.now() - t0)))
 
     return true
 end

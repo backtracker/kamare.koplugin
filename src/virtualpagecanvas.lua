@@ -58,6 +58,10 @@ local VirtualPageCanvas = Widget:extend{
     page_direction = 0, -- 0: LTR, 1: RTL
     dual_page_gap = 5,
 
+    -- Wide-page fit-height mode (Mihon's landscape zoom): in single-page
+    -- view, a wide page zooms to fill height and pans horizontally.
+    landscape_zoom = false,
+
     _layout_dirty = true,
 
     -- Callback (set by the viewer) invoked when a page is painted as "pending"
@@ -335,8 +339,15 @@ function VirtualPageCanvas:_computeZoomForPage(page)
     local zoom_w = viewport_w / page_w
     local zoom_h = viewport_h / page_h
 
+    local wide_zoom = self.landscape_zoom
+        and self.view_mode == 0
+        and self.zoom_mode == 0
+        and page_w > page_h
+
     local result
-    if self.zoom_mode == 1 then -- width
+    if wide_zoom then
+        result = zoom_h
+    elseif self.zoom_mode == 1 then -- width
         result = zoom_w
     elseif self.zoom_mode == 2 then -- height
         result = zoom_h
@@ -348,7 +359,7 @@ function VirtualPageCanvas:_computeZoomForPage(page)
     if self.zoom_mode == 1 then -- width
         local scaled_w = math.floor(page_w * result + 0.5)
         result = scaled_w / page_w
-    elseif self.zoom_mode == 2 then -- height
+    elseif self.zoom_mode == 2 or wide_zoom then -- height
         local scaled_h = math.floor(page_h * result + 0.5)
         result = scaled_h / page_h
     else
@@ -370,7 +381,7 @@ function VirtualPageCanvas:_maxNativePageWidth()
     end
     local max_w = 0
     for i = 1, self.document:getPageCount() do
-        local dims = self.document._dims_cache[i]
+        local dims = self.document:getNativePageDimensions(i)
         if dims and dims.w and dims.w > 0 then
             if dims.w > max_w then max_w = dims.w end
         end
@@ -788,21 +799,26 @@ function VirtualPageCanvas:paintScroll(target, x, y)
     local bottom_limit = self.dimen.h - self.bottom_margin
 
     local gap_px = math.floor(self.page_gap_height)
-    local prev_page
+    local first_visible = true
     for _, page_info in ipairs(visible_pages) do
-        if prev_page and page_info.page_num ~= prev_page and gap_px > 0 then
+        -- gap_before is false between the two halves of one split spread, so
+        -- they join seamlessly while ordinary page boundaries keep the gap.
+        -- The first visible page never draws a gap: its gap (if any) lies
+        -- above the viewport and drawing it would shift the stack.
+        if not first_visible and page_info.gap_before and gap_px > 0 then
             local remain_gap = bottom_limit - stacked_y
             if remain_gap <= 0 then break end
             local draw_gap = math.min(gap_px, remain_gap)
             stacked_y = stacked_y + draw_gap
         end
+        first_visible = false
 
         local remain = bottom_limit - stacked_y
         if remain <= 0 then break end
         local visible_h = page_info.visible_bottom - page_info.visible_top
         local slice_h_px = math.min(math.floor(visible_h), remain)
         if slice_h_px <= 0 then
-            prev_page = page_info.page_num
+            -- nothing to draw, continue with the next visible page
         else
             local top_px = math.floor(page_info.visible_top - page_info.page_top)
 
@@ -845,7 +861,6 @@ function VirtualPageCanvas:paintScroll(target, x, y)
             end
 
             stacked_y = stacked_y + actual_slice_h_px
-            prev_page = page_info.page_num
         end
     end
 
