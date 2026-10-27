@@ -307,9 +307,9 @@ function Kamare:onSuspend()
 end
 
 function Kamare:onNetworkConnected()
-    if self.browser then
-        self:_syncJournal()
-    end
+    -- Reconnect is a sync trigger on its own (spec 06), even if the browser
+    -- has not been opened yet in this session.
+    self:_syncJournal()
 end
 
 function Kamare:onResume()
