@@ -92,6 +92,19 @@ return function(t)
     t.ok(r and r.body == nil, "sink fetch returns no in-memory body")
     t.ok(read(sink) == data, "sink file matches payload")
 
+    -- byte progress callback fires while streaming to disk
+    local progress
+    local rp = run_fetch({ url = base .. "/file.bin", method = "GET", headers = {} }, {
+        sink_path = root .. "/progress.bin", total_timeout = 60, quantum_ms = 60,
+        on_progress = function(bytes, total)
+            progress = { bytes = bytes, total = total }
+        end,
+    }, "progress fetch")
+    t.ok(rp and rp.code == 200, "progress fetch 200")
+    t.ok(progress ~= nil, "on_progress called")
+    t.ok(progress and progress.bytes > 0, "on_progress reports bytes")
+    t.eq(progress and progress.total, #data, "on_progress knows content length")
+
     -- existing in-memory behaviour is untouched
     local r0 = run_fetch({ url = base .. "/file.bin", method = "GET", headers = {} }, {
         total_timeout = 60,

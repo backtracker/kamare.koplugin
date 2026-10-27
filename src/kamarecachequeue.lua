@@ -123,6 +123,32 @@ function Queue:_changed()
     safe_call(self.ui, "on_state_change", self:status())
 end
 
+-- Progress events arrive in bursts (one per network chunk); the UI only needs
+-- about one repaint per second. `clock()` is os.time(), so equal seconds are
+-- collapsed.
+function Queue:_progress_changed()
+    local t = self.clock()
+    if self._last_progress_at == t then return end
+    self._last_progress_at = t
+    self:_changed()
+end
+
+-- Bytes downloaded for one entry (0 if unknown). Per-page chapters report
+-- `bytesDone`; archive chapters use the `.part` size, which is also the
+-- resume offset.
+function Queue:entry_progress(entry)
+    if type(entry) ~= "table" then return 0, 0, 0 end
+    local total = tonumber(entry.archiveBytes) or 0
+    local done = tonumber(entry.bytesDone) or 0
+    if self.store and self.store.part_path then
+        local ok, size = pcall(self.store.file_size, self.store,
+            self.store:part_path(entry.serverKey, entry.chapterId))
+        if ok and tonumber(size) and size > done then done = size end
+    end
+    if total <= 0 then return done, 0, 0 end
+    return done, total, math.max(0, math.min(1, done / total))
+end
+
 -- ---- persistence ---------------------------------------------------------
 
 function Queue:load()
@@ -359,12 +385,15 @@ end
 function Queue:status()
     local total, done, index = 0, 0, 0
     for i, e in ipairs(self.entries) do
-        total = total + (tonumber(e.archiveBytes) or 0)
-        done = done + self.store:file_size(self.store:part_path(e.serverKey, e.chapterId))
+        local etotal = tonumber(e.archiveBytes) or 0
+        local edone = self:entry_progress(e)
+        total = total + etotal
+        done = done + math.min(edone, etotal > 0 and etotal or edone)
         if self.current == e then index = i end
     end
     total = total + self.completed_bytes
     done = done + self.completed_bytes
+    local current_done, current_total, current_fraction = self:entry_progress(self.current)
     return {
         state = self.state,
         current = self.current,
@@ -372,6 +401,10 @@ function Queue:status()
         total = #self.entries,
         bytes_done = done,
         bytes_total = total,
+        percent = total > 0 and math.max(0, math.min(1, done / total)) or 0,
+        current_bytes_done = current_done,
+        current_bytes_total = current_total,
+        current_percent = current_fraction,
         pending_count = #self.entries,
         consecutive_failures = self.consecutive_failures,
         pause_reason = self.pause_reason,
@@ -497,6 +530,7 @@ function Queue:_download_archive(entry)
 
     local part = self.store:part_path(entry.serverKey, entry.chapterId)
     self.store:ensure_dir(self.store:incoming_dir(entry.serverKey))
+    entry.bytesDone = nil
     local archive = self:_archive()
     local handle = archive.download_to_part({
         url = url,
@@ -507,6 +541,11 @@ function Queue:_download_archive(entry)
         scheduler = self.scheduler,
         pause_when = function()
             return self:_fetch().page_requests_inflight() > 0
+        end,
+        on_progress = function(bytes)
+            if self.current ~= entry or self.paused then return end
+            entry.bytesDone = tonumber(bytes) or 0
+            self:_progress_changed()
         end,
     }, function(ok, err)
         if self.current ~= entry or self.paused then return end
@@ -611,6 +650,7 @@ function Queue:_download_pages(entry, why)
     local dest_dir = self.store:chapter_dir(entry.serverKey, entry.seriesId, entry.chapterId)
     self:_archive().clear_dir(dest_dir)
     self.store:ensure_dir(dest_dir)
+    entry.bytesDone = 0
 
     self.state = "downloading"
     entry.state = "downloading"
@@ -659,6 +699,8 @@ function Queue:_download_pages(entry, why)
                 return
             end
             total_bytes = total_bytes + ((stats and stats.bytes) or 0)
+            entry.bytesDone = total_bytes
+            self:_progress_changed()
             page = page + 1
             next_page()
         end)

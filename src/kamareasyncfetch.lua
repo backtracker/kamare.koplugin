@@ -162,6 +162,18 @@ function AsyncFetch.fetch(req_table, opts, on_done)
     local result_err = nil
     local fail  -- assigned below; forward-declared for the sink helpers
 
+    -- Byte-level progress for long downloads. Throttled here so callers can
+    -- repaint a menu a couple of times per second without owning a timer.
+    local last_progress_ms = -1000
+    local function report_progress()
+        if not opts.on_progress then return end
+        local ms = time.to_ms(time.now() - t_start)
+        if ms - last_progress_ms < 400 then return end
+        last_progress_ms = ms
+        local ok, err = pcall(opts.on_progress, received, content_length, ms)
+        if not ok then logger.warn("[kamare:asyncfetch] on_progress failed:", err) end
+    end
+
     -- Optional file sink: stream bytes to disk instead of accumulating them.
     -- `received` then counts payload bytes written, which keeps the existing
     -- Content-Length accounting intact.
@@ -202,6 +214,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             return
         end
         received = received + #data
+        report_progress()
     end
 
     -- Incremental chunked decoder used only with a file sink. Payload bytes go
@@ -563,6 +576,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             else
                 body_chunks[#body_chunks + 1] = got
                 received = received + #got
+                report_progress()
             end
             body_tail = (body_tail .. got):sub(-8)
             -- Chunked fast-path: the body *may* have ended with the zero-size

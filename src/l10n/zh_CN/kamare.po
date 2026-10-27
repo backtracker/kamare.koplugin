@@ -253,6 +253,18 @@ msgstr "翻页方向"
 msgid "Page mode"
 msgstr "单页模式"
 
+msgid "Paused · network errors"
+msgstr "已暂停 · 网络错误"
+
+msgid "Paused · not enough disk space"
+msgstr "已暂停 · 磁盘空间不足"
+
+msgid "Paused · offline"
+msgstr "已暂停 · 离线"
+
+msgid "Paused · waiting for Wi-Fi"
+msgstr "已暂停 · 等待 Wi-Fi"
+
 msgid "Pencils:"
 msgstr "铅笔稿："
 
@@ -738,6 +750,9 @@ msgstr "缓存本卷"
 msgid "Downloading %1 / %2 · %3/%4"
 msgstr "下载中 %1 / %2 · 第 %3/%4 个"
 
+msgid "Downloading…"
+msgstr "下载中…"
+
 msgid "Downloads allowed on any connection"
 msgstr "允许在任何网络下下载"
 
@@ -747,11 +762,26 @@ msgstr "仅在 Wi-Fi 下下载（尽力而为）"
 msgid "Downloads paused"
 msgstr "下载已暂停"
 
+msgid "Downloads paused · no network"
+msgstr "下载已暂停 · 网络已断开"
+
+msgid "Downloads paused · not enough disk space"
+msgstr "下载已暂停 · 磁盘空间不足"
+
+msgid "Downloads paused · repeated network errors"
+msgstr "下载已暂停 · 连续网络错误"
+
+msgid "Downloads paused · waiting for Wi-Fi"
+msgstr "下载已暂停 · 等待 Wi-Fi"
+
 msgid "Everything selected is already cached"
 msgstr "所选章节均已缓存"
 
 msgid "Extracting"
 msgstr "解包中"
+
+msgid "Extracting…"
+msgstr "解包中…"
 
 msgid "From current progress"
 msgstr "从当前进度到结尾"

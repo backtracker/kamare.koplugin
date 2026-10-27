@@ -396,6 +396,10 @@ function Archive.download_to_part(opts, on_done)
         priority = "download",
         scheduler = opts.scheduler,
         pause_when = opts.pause_when,
+        -- Report absolute progress (resume offset + newly received bytes).
+        on_progress = opts.on_progress and function(bytes)
+            opts.on_progress(offset + (tonumber(bytes) or 0), opts.archive_bytes)
+        end,
     }, function(_, code, stats)
         if code == 200 and offset > 0 then
             -- Server ignored Range: the bytes from `offset` onwards are not the

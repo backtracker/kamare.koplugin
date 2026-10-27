@@ -332,6 +332,69 @@ return function(t)
         t.eq(store2:file_size(store2:part_path("srv1", 100)), 0, "abort deletes part")
     end
 
+    -- live progress: byte callbacks update entry.bytesDone and the UI status
+    do
+        local statuses = {}
+        local arch = fake_archive()
+        local base_download = arch.download_to_part
+        function arch.download_to_part(o, cb)
+            if o.on_progress then
+                o.on_progress(400)
+                o.on_progress(800)
+            end
+            return base_download(o, cb)
+        end
+        local q = make(t, { archive = arch })
+        q.ui.on_state_change = function(status) statuses[#statuses + 1] = status end
+        q:enqueue({ entry() })
+        q.scheduler:pump()
+        local saw = false
+        for __, s in ipairs(statuses) do
+            if s.state == "downloading" and (s.current_bytes_done or 0) > 0 then saw = true end
+        end
+        t.ok(saw, "progress callbacks report downloaded bytes")
+        t.ok(statuses[#statuses] and statuses[#statuses].state == "idle", "idle status last")
+    end
+
+    -- entry_progress reads the .part size, which is also the resume offset
+    do
+        local q, store = make(t)
+        local e = entry({ chapterId = 555 })
+        store:ensure_dir(store:incoming_dir("srv1"))
+        local f = assert(io.open(store:part_path("srv1", 555), "wb"))
+        f:write(string.rep("x", 250))
+        f:close()
+        local done, total, fraction = q:entry_progress(e)
+        t.eq(done, 250, "part size is live progress")
+        t.eq(total, 1000, "entry total is archiveBytes")
+        t.ok(math.abs(fraction - 0.25) < 0.001, "entry fraction")
+        local st = q:status()
+        t.eq(st.current_bytes_done, 0, "no current entry before start")
+    end
+
+    -- per-page downloads report page bytes as progress too
+    do
+        local statuses = {}
+        local q = make(t, { archive = fake_archive({ magic = false }) })
+        q.ui.on_state_change = function(status) statuses[#statuses + 1] = status end
+        q:enqueue({ entry() })
+        q.scheduler:pump()
+        local saw = false
+        for __, s in ipairs(statuses) do
+            if (s.current_bytes_done or 0) >= 10 then saw = true end
+        end
+        t.ok(saw, "per-page downloads report page bytes")
+    end
+
+    -- batch percent is byte based
+    do
+        local q = make(t)
+        q:enqueue({ entry() })
+        q.entries[1].bytesDone = 500
+        local st = q:status()
+        t.ok(math.abs(st.percent - 0.5) < 0.001, "status percent by bytes")
+    end
+
     -- duplicate enqueue is a no-op (single queue, unique chapters)
     do
         local q = make(t)

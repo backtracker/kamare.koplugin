@@ -154,9 +154,9 @@ function Kamare:_getCacheContext()
     local ui = {
         prevent_standby = function() UIManager:preventStandby() end,
         allow_standby = function() UIManager:allowStandby() end,
-        on_state_change = function()
+        on_state_change = function(status)
             if self.browser and self.browser.onCacheStateChanged then
-                self.browser:onCacheStateChanged()
+                self.browser:onCacheStateChanged(status)
             end
         end,
         on_chapter_done = function()

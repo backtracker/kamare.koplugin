@@ -339,15 +339,29 @@ function KavitaBrowser:_chapterMeta(chapter_id)
     return self:_store():read_meta(key, sid, chapter_id)
 end
 
-function KavitaBrowser:_chapterStatus(server_key, series_id, chapter)
+-- One index read per refresh. Reading meta.json (and the whole index again for
+-- is_stale) per row is far too slow to repeat while download progress ticks.
+function KavitaBrowser:_cacheStatusContext(server_key)
+    local by_id = {}
+    local key = server_key or self:_serverKeyForCurrent()
+    if key and self:_store() then
+        for __, entry in ipairs(self:_store():load_index_or_rebuild(key)) do
+            if entry.chapterId then by_id[entry.chapterId] = entry end
+        end
+    end
+    return { serverKey = key, by_id = by_id }
+end
+
+function KavitaBrowser:_chapterStatus(server_key, series_id, chapter, cache)
     if not chapter or not chapter.id then return nil end
     local store = self:_store()
-    local meta = store:read_meta(server_key, series_id, chapter.id)
-    if meta then
-        if store:is_stale(server_key, series_id, chapter.id) then return _("Needs update") end
+    cache = cache or self:_cacheStatusContext(server_key)
+    local cached = cache.by_id[chapter.id]
+    if cached then
+        if cached.stale then return _("Needs update") end
         local pos = self:_journal():get_position(server_key, chapter.id)
-        if pos and pos.pageNum and meta.pages then
-            if pos.pageNum >= meta.pages then return _("Read · cached") end
+        if pos and pos.pageNum and cached.pages then
+            if pos.pageNum >= cached.pages then return _("Read · cached") end
             if pos.pageNum > 0 then return _("Reading · cached") end
         elseif pos and pos.pageNum and pos.pageNum > 0 then
             return _("Reading · cached")
@@ -359,12 +373,17 @@ function KavitaBrowser:_chapterStatus(server_key, series_id, chapter)
         if entry.serverKey == server_key and entry.chapterId == chapter.id then
             if entry.state == "extracting" then return _("Extracting") end
             if entry.state == "failed" then return _("Download failed · retry") end
-            if entry.state == "downloading" or entry.state == "queued" then
-                local part = store:file_size(store:part_path(server_key, chapter.id))
-                local total = tonumber(chapter.bytes) or tonumber(entry.archiveBytes)
-                if part > 0 and total and total > 0 then
-                    return string.format("%s / %s", format_bytes(part), format_bytes(total))
+            if entry.state == "downloading" then
+                local done, total, fraction = self:_queue():entry_progress(entry)
+                if total > 0 then
+                    return string.format("%d%% · %s / %s",
+                        math.floor(fraction * 100 + 0.5),
+                        format_bytes(done), format_bytes(total))
                 end
+                if done > 0 then return format_bytes(done) end
+                return _("Downloading…")
+            end
+            if entry.state == "queued" then
                 return _("Queued")
             end
         end
@@ -381,22 +400,50 @@ function KavitaBrowser:_chapterStatus(server_key, series_id, chapter)
     return nil
 end
 
-function KavitaBrowser:_volumeStatus(server_key, series_id, volume)
+function KavitaBrowser:_volumeStatus(server_key, series_id, volume, cache)
     local chapters = (type(volume.chapters) == "table") and volume.chapters or {}
     local total, cached, reading, stale = 0, 0, false, false
+    local in_flight, progress_done, progress_total = 0, 0, 0
+    local queue = self:_queue()
+    cache = cache or self:_cacheStatusContext(server_key)
+    local queued = {}
+    for __, entry in ipairs(queue.entries or {}) do
+        if entry.serverKey == server_key and entry.seriesId == series_id
+            and entry.state ~= "failed" then
+            queued[entry.chapterId] = entry
+        end
+    end
     for __, ch in ipairs(chapters) do
         total = total + 1
-        local meta = self:_store():read_meta(server_key, series_id, ch.id)
-        if meta then
+        local index_entry = cache.by_id[ch.id]
+        if index_entry then
             cached = cached + 1
-            if self:_store():is_stale(server_key, series_id, ch.id) then stale = true end
+            if index_entry.stale then stale = true end
             local pos = self:_journal():get_position(server_key, ch.id)
             if pos and pos.pageNum and pos.pageNum > 0 then reading = true end
+        else
+            local entry = queued[ch.id]
+            if entry then
+                local done, entry_total = queue:entry_progress(entry)
+                in_flight = in_flight + 1
+                progress_done = progress_done + done
+                progress_total = progress_total
+                    + (entry_total > 0 and entry_total or (tonumber(ch.bytes) or 0))
+            end
         end
     end
     if stale then return _("Needs update") end
     if total > 0 and cached == total then
         return reading and _("Reading · cached") or _("Cached")
+    end
+    if in_flight > 0 then
+        local label = T(_("%1/%2 cached"), cached, total)
+        if progress_total > 0 then
+            return label .. string.format(" · %d%% · %s / %s",
+                math.floor(progress_done / progress_total * 100 + 0.5),
+                format_bytes(progress_done), format_bytes(progress_total))
+        end
+        return label .. " · " .. _("Downloading…")
     end
     if cached > 0 then return T(_("%1/%2 cached"), cached, total) end
     return nil
@@ -479,6 +526,7 @@ function KavitaBrowser:_refreshSeriesCache(server_key, series_id, detail)
 end
 
 function KavitaBrowser:_decorateSeriesItems(items, server_key, series_id)
+    local cache = self:_cacheStatusContext(server_key)
     for __, item in ipairs(items) do
         local status
         if item.kavita_chapter and item.chapter then
@@ -486,9 +534,9 @@ function KavitaBrowser:_decorateSeriesItems(items, server_key, series_id)
                 id = item.chapter.id,
                 pages = item.chapter.pages,
                 bytes = item._cache_bytes,
-            })
+            }, cache)
         elseif item.kavita_volume and item.volume then
-            status = self:_volumeStatus(server_key, series_id, item.volume)
+            status = self:_volumeStatus(server_key, series_id, item.volume, cache)
         end
         if status then
             item._cache_status = status
@@ -705,25 +753,45 @@ function KavitaBrowser:_setWifiOnly(enabled)
     })
 end
 
+-- Cache usage walks the whole tree; only reuse it while a transfer is actively
+-- repainting the shelf, so an explicit delete/open still shows fresh numbers.
+function KavitaBrowser:_cachedUsage(store, reuse)
+    local now = os.time()
+    local cached = self._usage_cache
+    if reuse and cached and now - cached.at < 5 then return cached end
+    local usage = store:total_usage()
+    self._usage_cache = { at = now, used = usage.used, chapters = usage.chapters }
+    return self._usage_cache
+end
+
 function KavitaBrowser:_shelfSubtitle()
     local cache = self:_cacheContext()
     local store, journal, queue = cache.store, cache.journal, cache.queue
     local parts = {}
+    local status = queue:status()
+    local active = status.state == "downloading" or status.state == "extracting"
     if self.offline then parts[#parts + 1] = _("Offline: showing cached series only") end
-    local usage = store:total_usage()
+    local usage = self:_cachedUsage(store, active)
     if usage.chapters > 0 then
         parts[#parts + 1] = T(_("Used %1 · %2 free"),
             format_bytes(usage.used), format_bytes(store:free_bytes() or 0))
     end
-    local status = queue:status()
     if status.pending_count and status.pending_count > 0 and queue:is_paused()
         and status.pause_reason ~= "restored" then
-        parts[#parts + 1] = _("Downloads paused")
-    end
-    if status.state == "downloading" or status.state == "extracting" then
+        local reason_text = {
+            wifi = _("Paused · waiting for Wi-Fi"),
+            offline = _("Paused · offline"),
+            low_space = _("Paused · not enough disk space"),
+            network = _("Paused · network errors"),
+        }
+        parts[#parts + 1] = reason_text[status.pause_reason] or _("Downloads paused")
+    elseif status.state == "extracting" then
+        parts[#parts + 1] = _("Extracting…")
+    elseif status.state == "downloading" then
+        local pct = math.floor((status.percent or 0) * 100 + 0.5)
         parts[#parts + 1] = T(_("Downloading %1 / %2 · %3/%4"),
             format_bytes(status.bytes_done), format_bytes(status.bytes_total),
-            status.index, status.total)
+            status.index, status.total) .. string.format(" · %d%%", pct)
     end
     local pending = journal:pending_count()
     if pending > 0 then parts[#parts + 1] = T(_("%1 pending sync"), pending) end
@@ -891,7 +959,6 @@ function KavitaBrowser:_shelfSeriesFromIndex(server_key, series_id)
 end
 
 function KavitaBrowser:showOfflineSeries(item)
-    local store = self:_store()
     local key = item._cache_server_key
     local sid = item._cache_series_id
     local series = self:_shelfSeriesFromIndex(key, sid)
@@ -907,9 +974,10 @@ function KavitaBrowser:showOfflineSeries(item)
     self.catalog_title = series.seriesName or item.text
 
     local items, cached_count = {}, 0
+    local cache = self:_cacheStatusContext(key)
     for __, c in ipairs(chapters) do
-        local cached = store:has_meta(key, sid, c.id)
-        local status = self:_chapterStatus(key, sid, c)
+        local cached = cache.by_id[c.id] ~= nil
+        local status = self:_chapterStatus(key, sid, c, cache)
         if cached then cached_count = cached_count + 1 end
         items[#items + 1] = {
             text = c.title or tostring(c.number or c.id),
@@ -986,17 +1054,64 @@ function KavitaBrowser:_launchLocalChapter(server_key, series_id, chapter_id)
     end)
 end
 
-function KavitaBrowser:onCacheStateChanged()
-    if self.view_kind == "shelf" then
-        UIManager:nextTick(function()
-            if self.view_kind == "shelf" then self:showCacheShelf(true) end
-        end)
+-- Queue → UI. Fires on every state change, and about once per second while
+-- bytes are moving (kamareasyncfetch throttles its byte callbacks). Repaint the
+-- visible view in place; a series refresh must never refetch from the server.
+function KavitaBrowser:onCacheStateChanged(status)
+    status = status or (self:_queue() and self:_queue():status()) or {}
+    local previous = self._last_queue_state
+    self._last_queue_state = status.state
+    if status.state == "paused" and previous ~= "paused" then
+        self:_notifyDownloadPaused(status.pause_reason)
     end
+    if self._progress_refresh_pending then return end
+    self._progress_refresh_pending = true
+    UIManager:scheduleIn(0.25, function()
+        self._progress_refresh_pending = false
+        if not UIManager:isWidgetShown(self) then return end
+        if self.view_kind == "shelf" then
+            self:showCacheShelf(true)
+        elseif self.view_kind == "series" then
+            self:refreshSeriesItemsInPlace()
+        end
+    end)
+end
+
+function KavitaBrowser:_notifyDownloadPaused(reason)
+    local texts = {
+        wifi = _("Downloads paused · waiting for Wi-Fi"),
+        offline = _("Downloads paused · no network"),
+        low_space = _("Downloads paused · not enough disk space"),
+        network = _("Downloads paused · repeated network errors"),
+    }
+    local text = texts[reason]
+    if text then UIManager:show(InfoMessage:new{ text = text }) end
+end
+
+-- Rebuild the current series rows from the already fetched detail: no network,
+-- keeps the current page. Used for live download progress and chapter finish.
+function KavitaBrowser:refreshSeriesItemsInPlace()
+    local detail = self.current_series_detail
+    if not detail then return end
+    local items = {}
+    for __, it in ipairs(self:buildKavitaVolumeItems(detail.volumes or {})) do
+        items[#items + 1] = it
+    end
+    for __, it in ipairs(self:buildKavitaChapterItems(detail.chapters or {}, "chapter")) do
+        items[#items + 1] = it
+    end
+    for __, it in ipairs(self:buildKavitaChapterItems(detail.specials or {}, "special")) do
+        items[#items + 1] = it
+    end
+    local key = self:_serverKeyForCurrent()
+    if key then self:_decorateSeriesItems(items, key, self.current_series_id) end
+    self:switchItemTable(nil, items, -1, nil, self.catalog_author)
 end
 
 function KavitaBrowser:onCacheChapterDone()
+    if not UIManager:isWidgetShown(self) then return end
     if self.view_kind == "series" then
-        self:refreshCurrentView()
+        self:refreshSeriesItemsInPlace()
     elseif self.view_kind == "shelf" then
         self:showCacheShelf(true)
     end
