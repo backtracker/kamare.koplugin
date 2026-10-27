@@ -904,4 +904,3 @@ msgstr "保留服务器"
 
 msgid "Use this device"
 msgstr "用本机位置"
-
