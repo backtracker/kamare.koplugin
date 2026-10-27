@@ -678,6 +678,26 @@ function KavitaClient:buildImageRequestTable(chapter_id, page0)
     }
 end
 
+-- Build a request table for the whole-chapter download endpoint.
+-- GET /api/Download/chapter?chapterId={id} (query parameter, never a path).
+-- Returns {url, method, headers} or nil, err.
+function KavitaClient:buildChapterDownloadRequest(chapter_id)
+    if not chapter_id then
+        return nil, "chapterId required"
+    end
+    if not self.base_url then
+        return nil, "Missing base_url"
+    end
+    local base = self.base_url:gsub("/+$", "")
+    local full_url = base .. "/api/Download/chapter"
+        .. self:_buildQueryString({ chapterId = chapter_id })
+    local headers, auth_err = self:_buildAuthHeaders("*/*")
+    if not headers then
+        return nil, auth_err
+    end
+    return { url = full_url, method = "GET", headers = headers }
+end
+
 -- Creates a page table for Kavita Reader images.
 -- Page images are fetched on demand by the async non-blocking client
 -- (kamareasyncfetch.lua); the page count is supplied separately by the viewer
