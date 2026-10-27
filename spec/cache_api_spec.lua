@@ -317,9 +317,7 @@ return function(t)
     t.eq(#resume_settings.data.servers, 1, "resume_page creates no server key")
 
     local plain = Cache.resume_page("https://example", 10)
-    t.eq(plain and plain.page, 1, "no progress starts at page 1")
-    t.is_nil(plain and plain.source, "no progress has no source")
-    t.is_nil(plain and plain.status, "no progress has no status")
+    t.is_nil(plain, "no journal position and no snapshot has no resume page")
 
     local snapshot = Cache.resume_page("https://example", 11)
     t.eq(snapshot and snapshot.page, 42, "snapshot is a 1-based page number")

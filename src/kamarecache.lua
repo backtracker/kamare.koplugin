@@ -307,8 +307,8 @@ function Cache.summary(base_url)
 end
 
 -- Read-only: 1-based, clamped. Journal position first, then the cached page
--- snapshot, otherwise page 1 with no source. Never lazily creates a server key
--- and never writes the journal.
+-- snapshot; neither present means nil (no recorded position, spec 01 A3).
+-- Never lazily creates a server key and never writes the journal.
 function Cache.resume_page(base_url, chapter_id, series_id)
     if not base_url or base_url == "" then return nil, "base_url_required" end
     if not chapter_id then return nil end
@@ -338,6 +338,12 @@ function Cache.resume_page(base_url, chapter_id, series_id)
     local pages = meta and tonumber(meta.pages) or nil
     local journal_page = pos and tonumber(pos.pageNum) or nil
     if journal_page and journal_page <= 0 then journal_page = nil end
+    if not journal_page and not (snapshot and snapshot > 0) then
+        -- Cached, but no recorded position at all: there is no resume page
+        -- (spec 01 A3). Returning page 1 here would claim a source that the
+        -- cache does not have.
+        return nil
+    end
 
     local source
     if journal_page then
