@@ -95,6 +95,11 @@ Releases inject the plugin version into `kamareversion.lua`; checkouts report
 `0.10.0-dev`. The cache module (`kamarecache`) is versioned independently:
 `API_VERSION = 1` with a `capabilities` table, so other plugins can probe it
 with `pcall(require, "kamarecache")` and degrade silently when it is absent.
+Capabilities: `status`, `summary`, `enqueue`, `delete`, `server`
+(`register_server`), `resume` (`resume_page`), `queue` (`queue_state`),
+`queue_control` (pause/resume/retry), `index`, `open`, `estimate`. Failures
+return `nil, code, message` with stable snake_case codes; read-only calls never
+create a server key and never flush settings.
 
 ## Configuration
 

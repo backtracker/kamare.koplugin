@@ -58,6 +58,12 @@ function Kamare:init()
 
     self.servers = self.kamare_settings:readSetting("servers", {})
 
+    -- Publish the plugin's single settings + client to the public facade at
+    -- startup: Moon may call the cache API before the browser is ever opened,
+    -- and a lazily built second LuaSettings instance would diverge from ours.
+    local Cache = require("kamarecache")
+    Cache.set_context{ settings = self.kamare_settings, client = KavitaClient }
+
     self:_initializeDeviceId()
 
     -- Set the device ID on KavitaClient
@@ -150,16 +156,31 @@ end
 
 -- Lazily build the shared cache context: one store, one journal and one
 -- download queue for the whole plugin session (spec 05 A10: single writer).
+-- Any instances the facade already built are adopted, not replaced (01 A2).
 function Kamare:_getCacheContext()
     if self._cache_context then return self._cache_context end
+    local Cache = require("kamarecache")
     local Store = require("kamarecachestore")
     local Journal = require("kamarejournal")
     local Queue = require("kamarecachequeue")
     local KavitaClient = require("kavitaclient")
 
-    local store = Store:new{}
-    local journal = Journal:new{ scheduler = UIManager }
-    journal:load()
+    -- One settings instance, always the plugin's: if the facade opened its own
+    -- copy earlier, both the queue and the context must point at ours.
+    local existing = Cache.get_context()
+    if existing and existing.settings and existing.settings ~= self.kamare_settings then
+        existing.settings = self.kamare_settings
+        if existing.queue then existing.queue.settings = self.kamare_settings end
+    end
+    Cache.set_context{ settings = self.kamare_settings, client = KavitaClient }
+    local shared = Cache.get_context() or {}
+
+    local store = shared.store or Store:new{}
+    local journal = shared.journal
+    if not journal then
+        journal = Journal:new{ scheduler = UIManager }
+        journal:load()
+    end
 
     local ui = {
         prevent_standby = function() UIManager:preventStandby() end,
@@ -175,28 +196,34 @@ function Kamare:_getCacheContext()
             end
         end,
     }
-    local queue = Queue:new{
-        store = store,
-        settings = self.kamare_settings,
-        client = KavitaClient,
-        ui = ui,
+    local network = {
         -- Route the queue's online/wifi checks through the plugin so the
         -- simulated-offline switch pauses and resumes downloads too.
-        network = {
-            isOnline = function() return not self:isOffline() end,
-            isWifiOn = function()
-                local ok, on = pcall(function() return NetworkMgr:isWifiOn() end)
-                return (not ok) or on ~= false
-            end,
-        },
+        isOnline = function() return not self:isOffline() end,
+        isWifiOn = function()
+            local ok, on = pcall(function() return NetworkMgr:isWifiOn() end)
+            return (not ok) or on ~= false
+        end,
     }
-    queue:load()
+
+    local queue = shared.queue
+    if queue then
+        if queue.attach_ui then queue:attach_ui(ui, network) end
+    else
+        queue = Queue:new{
+            store = store,
+            settings = self.kamare_settings,
+            client = KavitaClient,
+            ui = ui,
+            network = network,
+        }
+        queue:load()
+    end
 
     self._cache_context = { store = store, journal = journal, queue = queue }
 
     -- Publish the very same instances through the public facade so external
     -- callers share one queue and one writer (spec 05 A10 / 09 A2).
-    local Cache = require("kamarecache")
     Cache.set_context(self._cache_context)
     self.cache_api = Cache
 
