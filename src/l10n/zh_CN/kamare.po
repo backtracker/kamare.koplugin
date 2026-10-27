@@ -615,8 +615,8 @@ msgstr "已清空全部缓存，释放 %1"
 msgid "Already cached or queued"
 msgstr "已缓存或已在队列中"
 
-msgid "Cache %1 chapter(s)? Download about %2; unpacking peaks at %3, final size about %2 (%4 available)"
-msgstr "缓存 %1 章？下载约 %2；解包时峰值约需 %3，完成后仍占约 %2（可用 %4）"
+msgid "Cache %1 chapter(s)? Download %2, unpack peak %3 (%4 available)"
+msgstr "缓存 %1 章？下载 %2，解包峰值 %3（可用 %4）"
 
 msgid "Cache cleared, freed %1"
 msgstr "缓存已清空，释放 %1"
@@ -822,11 +822,11 @@ msgstr "未缓存 · 联网后可下载"
 msgid "Not enough free space to download"
 msgstr "可用空间不足，无法下载"
 
-msgid "Not enough space: unpack peak needs %.0f MB, %.0f MB available"
-msgstr "空间不足：解包峰值需要约 %.0f MB，可用 %.0f MB"
+msgid "Not enough space: unpack peak %.0f MB, %.0f MB available"
+msgstr "空间不足：解包峰值 %.0f MB，可用 %.0f MB"
 
-msgid "Not enough space to unpack: peak need about %1, %2 available"
-msgstr "空间不足：解包峰值约需 %1，可用 %2"
+msgid "Not enough space: unpack peak %1, %2 available"
+msgstr "空间不足：解包峰值 %1，可用 %2"
 
 msgid "Nothing to delete"
 msgstr "没有可删除的内容"

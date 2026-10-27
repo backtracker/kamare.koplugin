@@ -620,7 +620,7 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
     local free = store:free_bytes()
     if free and peak_bytes > free then
         UIManager:show(InfoMessage:new{
-            text = T(_("Not enough space to unpack: peak need about %1, %2 available"),
+            text = T(_("Not enough space: unpack peak %1, %2 available"),
                 format_bytes(peak_bytes), format_bytes(free)),
         })
         return
@@ -628,7 +628,7 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
 
     local dialog
     dialog = ConfirmBox:new{
-        text = T(_("Cache %1 chapter(s)? Download about %2; unpacking peaks at %3, final size about %2 (%4 available)"),
+        text = T(_("Cache %1 chapter(s)? Download %2, unpack peak %3 (%4 available)"),
             #entries, format_bytes(download_bytes), format_bytes(peak_bytes),
             format_bytes(free or 0)),
         ok_text = _("Download"),
