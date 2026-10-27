@@ -694,11 +694,18 @@ function KavitaBrowser:_confirmAndEnqueue(entries, opts)
         return
     end
 
-    local dialog
-    dialog = ConfirmBox:new{
+    local text
+    if free then
         text = T(_("Cache %1? Download %2, unpack peak %3 (%4 available)"),
             unit_text, format_bytes(download_bytes), format_bytes(peak_bytes),
-            format_bytes(free or 0)),
+            format_bytes(free))
+    else
+        text = T(_("Cache %1? Download %2, unpack peak %3"),
+            unit_text, format_bytes(download_bytes), format_bytes(peak_bytes))
+    end
+    local dialog
+    dialog = ConfirmBox:new{
+        text = text,
         ok_text = _("Download"),
         ok_callback = function()
             UIManager:close(dialog)
@@ -850,7 +857,11 @@ function KavitaBrowser:_shelfSubtitle()
         parts[#parts + 1] = simulated and _("Simulated offline") or _("Offline mode")
     end
     local usage = self:_cachedUsage(store, active)
-    local free_text = T(_("Free %1"), format_bytes(store:free_bytes() or 0))
+    local free = store:free_bytes()
+    local free_text = free and T(_("Free %1"), format_bytes(free)) or nil
+    local function with_free(text)
+        return free_text and (text .. " · " .. free_text) or text
+    end
     local paused = status.pending_count and status.pending_count > 0
         and queue:is_paused() and status.pause_reason ~= "restored"
     if paused then
@@ -860,20 +871,20 @@ function KavitaBrowser:_shelfSubtitle()
             low_space = _("Paused · not enough disk space"),
             network = _("Paused · network errors"),
         }
-        parts[#parts + 1] = (reason_text[status.pause_reason] or _("Downloads paused"))
-            .. " · " .. free_text
+        parts[#parts + 1] = with_free(reason_text[status.pause_reason] or _("Downloads paused"))
     elseif status.state == "extracting" then
-        parts[#parts + 1] = _("Extracting…") .. " · " .. free_text
+        parts[#parts + 1] = with_free(_("Extracting…"))
     elseif status.state == "downloading" then
         local pct = math.floor((status.percent or 0) * 100 + 0.5)
-        parts[#parts + 1] = T(_("Downloading %1 · %2/%3"),
+        parts[#parts + 1] = with_free(T(_("Downloading %1 · %2/%3"),
             string.format("%d%%", pct),
-            format_bytes(status.bytes_done), format_bytes(status.bytes_total))
-            .. " · " .. free_text
-    elseif usage.chapters > 0 then
+            format_bytes(status.bytes_done), format_bytes(status.bytes_total)))
+    elseif usage.chapters > 0 and free_text then
         parts[#parts + 1] = T(_("Used %1 · %2 free"),
-            format_bytes(usage.used), format_bytes(store:free_bytes() or 0))
-    else
+            format_bytes(usage.used), format_bytes(free))
+    elseif usage.chapters > 0 then
+        parts[#parts + 1] = T(_("Used %1"), format_bytes(usage.used))
+    elseif free_text then
         parts[#parts + 1] = free_text
     end
     local pending = journal:pending_count()

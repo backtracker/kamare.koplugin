@@ -130,6 +130,15 @@ return function(t)
     t.eq(total.used, expected_usage, "total usage")
     t.ok(type(store:free_bytes()) == "number", "free bytes is a number")
 
+    -- free space is measured on the data dir before the cache root exists
+    do
+        local dir = t.tmpdir()
+        local fresh = Store:new{ data_dir = dir }
+        t.ok(not fresh:exists(fresh:cache_root()), "cache root absent before first download")
+        local free = fresh:free_bytes()
+        t.ok(type(free) == "number" and free > 0, "free space falls back to data dir")
+    end
+
     -- delete chapter clears dir + part + index
     local freed = store:delete_chapter(sk, sid, cid)
     t.eq(freed, expected_usage - 50, "delete chapter frees pages+meta+part (cover kept)")

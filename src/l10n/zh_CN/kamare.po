@@ -618,6 +618,9 @@ msgstr "已缓存或已在队列中"
 msgid "Cache %1? Download %2, unpack peak %3 (%4 available)"
 msgstr "缓存 %1？下载 %2，解包峰值 %3（可用 %4）"
 
+msgid "Cache %1? Download %2, unpack peak %3"
+msgstr "缓存 %1？下载 %2，解包峰值 %3"
+
 msgid "Cache cleared, freed %1"
 msgstr "缓存已清空，释放 %1"
 
@@ -926,6 +929,9 @@ msgstr "更新过期章节"
 
 msgid "Used %1 · %2 free"
 msgstr "已用 %1 · 可用 %2"
+
+msgid "Used %1"
+msgstr "已用 %1"
 
 msgid "Whole series"
 msgstr "整个系列"

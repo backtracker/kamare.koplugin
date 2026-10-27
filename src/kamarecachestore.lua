@@ -575,11 +575,19 @@ function Store:total_usage()
 end
 
 function Store:free_bytes()
-    local ok, _, _, avail = pcall(function()
-        local util = require("ffi/util")
-        return util.df(self:cache_root())
-    end)
-    if not ok then return nil end
+    local ok, util = pcall(require, "ffi/util")
+    if not ok or not util then return nil end
+    local function avail_of(path)
+        local pok, _, _, avail = pcall(util.df, path)
+        if not pok then return nil end
+        return avail
+    end
+    local avail = avail_of(self:cache_root())
+    if avail == nil then
+        -- The cache root is created by the first download; before that,
+        -- statvfs() on it fails. The data dir is on the same filesystem.
+        avail = avail_of(self:_data_dir())
+    end
     return avail
 end
 
