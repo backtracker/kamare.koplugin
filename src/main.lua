@@ -241,6 +241,14 @@ function Kamare:_showBrowser(offline)
         set_offline_mode = function(forced)
             self.kamare_settings:saveSetting("force_offline", forced and true or false)
             pcall(function() self.kamare_settings:flush() end)
+            local ctx = self._cache_context
+            if ctx then
+                if forced then
+                    pcall(ctx.queue.pause, ctx.queue, "offline")
+                elseif ctx.queue:is_paused() and ctx.queue.pause_reason == "offline" then
+                    pcall(ctx.queue.resume, ctx.queue)
+                end
+            end
             UIManager:close(self.browser)
             UIManager:nextTick(function() self:_showBrowser(forced and true or false) end)
         end,
