@@ -840,6 +840,16 @@ return function(t)
     t.eq(open_client.base_url, "https://example", "open mirrors the client base url")
     t.ok(not open_store:exists(open_store:cache_root()), "open creates no cache directory")
 
+    -- A viewer module that cannot be loaded reports a stable code instead of a
+    -- bare message in the code slot.
+    open_settings.data.force_offline = nil
+    package.loaded["kamareimageviewer"] = {}
+    local noview, novcode = Cache.open{
+        base_url = "https://example", api_key = "k", entry = open_entry,
+    }
+    t.is_nil(noview, "open fails when the viewer module has no constructor")
+    t.eq(novcode, "viewer_unavailable", "viewer_unavailable code")
+
     package.loaded["kamareimageviewer"] = {
         active_instance = { metadata = { chapterId = 1 } },
     }

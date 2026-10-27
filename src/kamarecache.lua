@@ -895,7 +895,7 @@ function Cache.open(opts)
     }
 
     if not viewer_ok or type(viewer_mod) ~= "table" or type(viewer_mod.new) ~= "function" then
-        return nil, nil, _("The viewer is not available")
+        return nil, "viewer_unavailable", _("The viewer is not available")
     end
     local viewer = viewer_mod:new{
         ui = nil,
@@ -919,7 +919,7 @@ function Cache.open(opts)
         on_next_chapter_callback = opts.on_next,
     }
     if type(viewer) ~= "table" then
-        return nil, nil, _("Could not open the viewer")
+        return nil, "viewer_unavailable", _("Could not open the viewer")
     end
     if viewer._aborted then
         return nil, "viewer_running", _("A viewer is already open")
