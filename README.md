@@ -101,6 +101,12 @@ Capabilities: `status`, `summary`, `enqueue`, `delete`, `server`
 return `nil, code, message` with stable snake_case codes; read-only calls never
 create a server key and never flush settings.
 
+Contract notes: `open` on a cached chapter builds the read (journal) tier even
+when `start_page` is explicit, because the viewer records the offline session
+there on close — a deliberate deviation from the identity-only row in the API
+notes; it still never builds the queue. `queue_pause` on an empty queue
+returns `true` and `queue_state` stays `idle`, which is the truthful state.
+
 ## Configuration
 
 Access settings while reading by tapping the screen. Customize your experience:

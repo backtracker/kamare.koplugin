@@ -28,6 +28,16 @@ The context is built lazily in three tiers (identity / read / queue) so a
 read-only call never drags in the queue, and `register_server` never creates a
 queue or a journal. One store, one journal, one queue per process.
 
+Two deliberate deviations from the identity-only rows in the original API
+notes (01 A2 / A4), documented once here:
+  - `open` on a cached chapter also builds the read tier, even when
+    `start_page` is explicit. The viewer owns the offline reading session and
+    writes it to the journal on close, so an identity-only open would silently
+    lose progress. It still never builds the queue.
+  - `queue_pause` on an empty queue returns true and leaves `queue_state` at
+    `idle` -- the truthful state -- instead of reporting a meaningless
+    "paused".
+
 Capability probing (spec 09): `pcall(require, "kamarecache")` + api_version +
 capabilities. Missing module or a different major version means "no cache UI",
 silently -- never raise at the caller.
@@ -700,6 +710,8 @@ function Cache.delete(base_url, chapter_ids)
     if open_id then
         for __, chapter_id in ipairs(chapter_ids) do
             local id = tonumber(chapter_id) or chapter_id
+            -- Deliberately conservative: a viewer with no cache key may still
+            -- be streaming this cached chapter online, so it blocks too.
             if id == open_id and (open_key == nil or open_key == key) then
                 return nil, "chapter_open", _("This chapter is open; close it first")
             end
