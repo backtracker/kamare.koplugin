@@ -427,14 +427,21 @@ function Journal:sync(client, opts)
         return self:_session_end_for(a) < self:_session_end_for(b)
     end)
 
+    local unreachable = 0
     for _, pos in ipairs(pending) do
         local pok, remote, code = pcall(client.getReaderProgress, client, pos.chapterId)
         if not pok then remote, code = nil, -1 end
         if type(remote) ~= "table" or (type(code) == "number" and (code < 200 or code >= 300)) then
             summary.skipped = summary.skipped + 1
-            -- Server unreachable: do not hammer it for the rest of the batch.
-            if code == nil or code == -1 or code == "timeout" then break end
+            if code == nil or code == -1 or code == "timeout" then
+                -- Skip this entry; stop only once the server proves to be down
+                -- (three unreachable reads in a row) so a single flaky chapter
+                -- doesn't abandon the rest of the batch.
+                unreachable = unreachable + 1
+                if unreachable >= 3 then break end
+            end
         else
+            unreachable = 0
             local remote_page = tonumber(remote.pageNum) or 0
             local local_page = tonumber(pos.pageNum) or 0
             local push = local_page > remote_page
