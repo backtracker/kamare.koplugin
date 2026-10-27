@@ -12,6 +12,7 @@ local logger = require("logger")
 local KamareImageViewer = require("kamareimageviewer")
 local _ = require("gettext")
 local Utils = require("kamareutils")
+local CacheUtil = require("kamarecacheutil")
 local T = ffiUtil.template
 
 -- Progress indicator for read status
@@ -277,27 +278,16 @@ end
 -- Offline cache helpers (spec 02/03/04/05)
 -- ---------------------------------------------------------------------------
 
-local function format_bytes(n)
-    n = tonumber(n)
-    if not n or n <= 0 then return "0 MB" end
-    if n >= 1024 * 1024 * 1024 then return string.format("%.1f GB", n / (1024 * 1024 * 1024)) end
-    if n >= 1024 * 1024 then return string.format("%.0f MB", n / (1024 * 1024)) end
-    return string.format("%.0f KB", n / 1024)
-end
+local format_bytes = CacheUtil.format_bytes
 
 local function format_duration(seconds)
-    seconds = math.max(0, tonumber(seconds) or 0)
-    local h = math.floor(seconds / 3600)
-    local m = math.floor((seconds % 3600) / 60)
-    if h > 0 then return T(_("%1 h %2 min"), h, m) end
-    return T(_("%1 min"), m)
+    return CacheUtil.format_duration(seconds, function(h, m)
+        if h > 0 then return T(_("%1 h %2 min"), h, m) end
+        return T(_("%1 min"), m)
+    end)
 end
 
-local function append_status(subtitle, status)
-    if not status or status == "" then return subtitle end
-    if subtitle and subtitle ~= "" then return subtitle .. " · " .. status end
-    return status
-end
+local append_status = CacheUtil.append_status
 
 function KavitaBrowser:_cacheContext()
     if self.cache and self.cache.store then return self.cache end
@@ -529,6 +519,32 @@ function KavitaBrowser:_cacheEntriesFor(chapters)
         end
     end
     return out
+end
+
+function KavitaBrowser:_queueOrRetry(entries)
+    local queue = self:_queue()
+    local all_queued = #entries > 0
+    for _, e in ipairs(entries) do
+        if not queue:contains(e.serverKey, e.chapterId) then all_queued = false break end
+    end
+    if all_queued then
+        for _, e in ipairs(entries) do queue:retry(e.serverKey, e.chapterId) end
+        UIManager:show(InfoMessage:new{ text = _("Download queue resumed") })
+        self:onCacheStateChanged()
+        return
+    end
+    self:_confirmAndEnqueue(entries)
+end
+
+function KavitaBrowser:_abortQueueFor(server_key, series_id)
+    local queue = self:_queue()
+    local ids = {}
+    for _, e in ipairs(queue.entries or {}) do
+        if e.serverKey == server_key and (not series_id or e.seriesId == series_id) then
+            ids[#ids + 1] = e.chapterId
+        end
+    end
+    for _, id in ipairs(ids) do queue:abort(server_key, id) end
 end
 
 function KavitaBrowser:_confirmAndEnqueue(entries)
@@ -1015,12 +1031,8 @@ function KavitaBrowser:_isChapterRead(server_key, series_id, chapter)
     local meta = store:read_meta(server_key, series_id, chapter.chapterId or chapter.id)
     if not meta then return false end
     local pos = self:_journal():get_position(server_key, meta.chapterId)
-    if pos and pos.pageNum and meta.pages and pos.pageNum >= meta.pages then return true end
-    local server_read = tonumber(chapter.pagesRead)
-    if server_read and meta.pages and server_read >= meta.pages then return true end
-    local snapshot = tonumber(meta.pagesReadSnapshot)
-    if snapshot and meta.pages and snapshot >= meta.pages then return true end
-    return false
+    return CacheUtil.is_read(pos and pos.pageNum, meta.pagesReadSnapshot,
+        chapter.pagesRead, meta.pages)
 end
 
 function KavitaBrowser:_deleteChapters(list, opts)
@@ -1136,9 +1148,7 @@ function KavitaBrowser:_deleteSeriesCache(server_key, series_id)
         ok_text = _("Delete"),
         ok_callback = function()
             UIManager:close(dialog)
-            for _, c in ipairs(filtered) do
-                if queue:contains(server_key, c.chapterId) then queue:abort(server_key, c.chapterId) end
-            end
+            self:_abortQueueFor(server_key, series_id)
             store:delete_series(server_key, series_id)
             UIManager:show(InfoMessage:new{
                 text = T(_("Deleted this series cache, freed %1"), format_bytes(series_bytes)),
@@ -1173,9 +1183,7 @@ function KavitaBrowser:_clearServerCache(server_key)
         ok_text = _("Clear"),
         ok_callback = function()
             UIManager:close(dialog)
-            for _, c in ipairs(self:_chaptersFromIndex(server_key)) do
-                if queue:contains(server_key, c.chapterId) then queue:abort(server_key, c.chapterId) end
-            end
+            self:_abortQueueFor(server_key, nil)
             store:delete_server(server_key)
             UIManager:show(InfoMessage:new{
                 text = T(_("Cache cleared, freed %1"), format_bytes(usage.used)),
@@ -1200,9 +1208,7 @@ function KavitaBrowser:_clearAllCache()
         ok_callback = function()
             UIManager:close(dialog)
             for _, key in ipairs(keys) do
-                for _, c in ipairs(self:_chaptersFromIndex(key)) do
-                    if queue:contains(key, c.chapterId) then queue:abort(key, c.chapterId) end
-                end
+                self:_abortQueueFor(key, nil)
             end
             store:delete_all()
             UIManager:show(InfoMessage:new{
@@ -2712,12 +2718,8 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
     local start_page = 1
     if local_meta then
         local pos = self:_journal():get_position(cache_key, chapter.id)
-        local pr = pos and tonumber(pos.pageNum)
-        if pr and pr > 0 then
-            start_page = math.min(pr, pages)
-        elseif tonumber(local_meta.pagesReadSnapshot or 0) > 0 then
-            start_page = math.min(local_meta.pagesReadSnapshot, pages)
-        end
+        start_page = CacheUtil.resolve_start_page(pos and pos.pageNum,
+            local_meta.pagesReadSnapshot, pages)
     elseif type(chapter.pagesRead) == "number" then
         local pr = math.max(0, math.floor(chapter.pagesRead))
         if pr >= pages then
@@ -3527,7 +3529,7 @@ function KavitaBrowser:onMenuHold(item)
                             for _, f in ipairs(chapter.files or {}) do
                                 bytes = bytes + (tonumber(f.bytes) or 0)
                             end
-                            self:_confirmAndEnqueue(self:_cacheEntriesFor({
+                            self:_queueOrRetry(self:_cacheEntriesFor({
                                 {
                                     id = chapter.id, volumeId = chapter.volumeId,
                                     number = chapter.number,
@@ -3759,7 +3761,7 @@ function KavitaBrowser:onMenuHold(item)
                             text = "\u{2913} " .. _("Download volume"),
                             callback = function()
                                 UIManager:close(dialog)
-                                self:_confirmAndEnqueue(entries)
+                                self:_queueOrRetry(entries)
                             end,
                         },
                     })

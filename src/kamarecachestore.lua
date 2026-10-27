@@ -629,6 +629,22 @@ function Store:generate_server_key(existing_keys)
     return sha2.md5(seed .. "fallback"):sub(1, 8):lower()
 end
 
+-- Read-only variant: returns the stored key or nil, never writes settings.
+function Store:find_server_key(settings, server)
+    if not settings or type(server) ~= "table" then return nil end
+    local servers = settings:readSetting("servers", {}) or {}
+    local wanted_url = server.base_url or server.url or server.kavita_url
+    local wanted_name = server.name
+    for _, s in ipairs(servers) do
+        if type(s) == "table" and
+            ((wanted_url and wanted_url ~= "" and (s.kavita_url == wanted_url or s.url == wanted_url))
+                or (wanted_name and s.name == wanted_name)) then
+            return s.key
+        end
+    end
+    return nil
+end
+
 -- Resolve (or lazily create) the stable cache key of a configured server.
 -- Matches the same way existing code decides "same server": url or name.
 function Store:resolve_server_key(settings, server)

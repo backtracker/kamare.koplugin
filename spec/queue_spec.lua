@@ -117,7 +117,7 @@ local function fake_archive(opts)
     return a
 end
 
-local function fake_fetch()
+local function fake_fetch(body)
     local f = { calls = 0, paths = {} }
     function f.page_requests_inflight() return 0 end
     function f.fetch(req, opts, cb)
@@ -126,7 +126,7 @@ local function fake_fetch()
         local dir = opts.sink_path:match("^(.*)/[^/]+$")
         os.execute("mkdir -p '" .. dir .. "'")
         local fh = assert(io.open(opts.sink_path, "wb"))
-        fh:write(string.rep("i", 10))
+        fh:write(body or ("\255\216" .. string.rep("i", 8)))
         fh:close()
         cb(nil, 200, { bytes = 10 })
         return { cancel = function() end }
@@ -158,7 +158,7 @@ local function make(t, overrides)
         network = overrides.network or { isOnline = function() return true end, isWifiOn = function() return true end },
         ui = ui,
         archive = overrides.archive or fake_archive(overrides.archive_opts),
-        fetch = fake_fetch(),
+        fetch = overrides.fetch or fake_fetch(),
         clock = function() return 1000 end,
     }
     return q, store, settings, scheduler, ui
@@ -330,6 +330,28 @@ return function(t)
         q2:abort("srv1", 100)
         t.eq(#q2.entries, 0, "abort removes entry")
         t.eq(store2:file_size(store2:part_path("srv1", 100)), 0, "abort deletes part")
+    end
+
+    -- duplicate enqueue is a no-op (single queue, unique chapters)
+    do
+        local q = make(t)
+        t.ok(q:enqueue({ entry() }), "first enqueue ok")
+        local ok, err = q:enqueue({ entry() })
+        t.is_nil(ok, "duplicate enqueue rejected")
+        t.ok(err and err:lower():find("already", 1, true) ~= nil, "duplicate message")
+        t.eq(#q.entries, 1, "only one queue entry")
+    end
+
+    -- a 200 response that is not an image is rejected (failure injection G2)
+    do
+        local q, store, _, scheduler = make(t, {
+            fetch = fake_fetch("<html>error</html>"),
+            archive_opts = { magic = false },
+        })
+        q:enqueue({ entry() })
+        scheduler:pump()
+        t.is_nil(store:read_meta("srv1", 20, 100), "no meta for non-image pages")
+        t.eq(q.entries[1].state, "failed", "non-image page marks chapter failed")
     end
 
     -- persistence restores paused, never auto-starts

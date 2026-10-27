@@ -27,6 +27,18 @@ local function now()
     return os.time()
 end
 
+local function looks_like_image(path)
+    local f = io.open(path, "rb")
+    if not f then return false end
+    local head = f:read(16) or ""
+    f:close()
+    return head:sub(1, 2) == "\255\216"          -- jpeg
+        or head:sub(1, 8) == "\137PNG\r\n\26\n" -- png
+        or head:sub(1, 4) == "GIF8"                -- gif
+        or (head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP")
+        or head:sub(5, 8) == "ftyp"                -- avif/heif
+end
+
 local function safe_call(ui, name, ...)
     if type(ui) ~= "table" or type(ui[name]) ~= "function" then return end
     local ok, err = pcall(ui[name], ...)
@@ -244,10 +256,11 @@ function Queue:enqueue(entries, opts)
         if not ok or not confirmed then return nil, _("Download cancelled") end
     end
 
+    local was_empty = #self.entries == 0
     for _, entry in ipairs(accepted) do
         self.entries[#self.entries + 1] = entry
     end
-    self.completed_bytes = 0
+    if was_empty then self.completed_bytes = 0 end
     self.paused = false
     self.pause_reason = nil
     self:save()
@@ -630,6 +643,10 @@ function Queue:_download_pages(entry, why)
             if self.current ~= entry or self.paused then return end
             if code ~= 200 then
                 self:_fail_entry(entry, "page " .. page .. " http " .. tostring(code))
+                return
+            end
+            if not looks_like_image(dest) then
+                self:_fail_entry(entry, "page " .. page .. " is not an image")
                 return
             end
             total_bytes = total_bytes + ((stats and stats.bytes) or 0)
