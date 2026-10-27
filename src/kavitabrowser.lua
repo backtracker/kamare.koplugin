@@ -736,9 +736,9 @@ function KavitaBrowser:_confirmAndEnqueue(entries, opts)
         ok_text = _("Download"),
         ok_callback = function()
             UIManager:close(dialog)
-            local ok, err = self:_queue():enqueue(entries)
+            local ok, err, msg = self:_queue():enqueue(entries)
             if not ok then
-                UIManager:show(InfoMessage:new{ text = tostring(err) })
+                UIManager:show(InfoMessage:new{ text = tostring(msg or err) })
             else
                 UIManager:show(InfoMessage:new{ text = T(_("Queued %1"), unit_text) })
                 self:onCacheStateChanged()
@@ -1544,9 +1544,9 @@ function KavitaBrowser:_updateCachedChapters(chapters)
                 store:delete_chapter(key, sid, c.id)
             end
             local entries = self:_cacheEntriesFor(chapters)
-            local ok, err = self:_queue():enqueue(entries)
+            local ok, err, msg = self:_queue():enqueue(entries)
             if not ok then
-                UIManager:show(InfoMessage:new{ text = tostring(err) })
+                UIManager:show(InfoMessage:new{ text = tostring(msg or err) })
             else
                 UIManager:show(InfoMessage:new{ text = T(_("Queued %1 chapter(s) for update"), #entries) })
             end

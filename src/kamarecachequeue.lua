@@ -75,6 +75,15 @@ function Queue:new(opts)
     return o
 end
 
+-- Adopt the UI hooks and network wrapper of the plugin that owns this queue.
+-- The facade may have built the queue before the plugin UI existed; main.lua
+-- then attaches the real hooks instead of creating a second queue (01 A2).
+function Queue:attach_ui(ui, network)
+    if ui ~= nil then self.ui = ui end
+    if network ~= nil then self.network = network end
+    return self
+end
+
 function Queue:_scheduler()
     if not self.scheduler then self.scheduler = require("ui/uimanager") end
     return self.scheduler
@@ -270,15 +279,18 @@ end
 
 function Queue:enqueue(entries, opts)
     opts = opts or {}
-    if type(entries) ~= "table" or #entries == 0 then return nil, _("Nothing to download") end
+    if type(entries) ~= "table" or #entries == 0 then
+        return nil, nil, _("Nothing to download")
+    end
 
     local accepted, seen, total = {}, {}, 0
+    local cached_count, queued_count = 0, 0
     for __, raw in ipairs(entries or {}) do
         if type(raw) == "table" and raw.chapterId and raw.serverKey then
             local key = chunk_key(raw.serverKey, raw.chapterId)
-            local duplicate = seen[key] or self:contains(raw.serverKey, raw.chapterId)
-                or self.store:has_meta(raw.serverKey, raw.seriesId, raw.chapterId)
-            if not duplicate then
+            local queued = seen[key] or self:contains(raw.serverKey, raw.chapterId)
+            local cached = self.store:has_meta(raw.serverKey, raw.seriesId, raw.chapterId)
+            if not queued and not cached then
                 local entry = {}
                 for k, v in pairs(raw) do entry[k] = v end
                 local ok, err = self:_hydrate(entry)
@@ -293,11 +305,19 @@ function Queue:enqueue(entries, opts)
                 else
                     logger.warn("[kamare:queue] skip chapter", raw.chapterId, err)
                 end
+            else
+                if queued then queued_count = queued_count + 1 end
+                if cached then cached_count = cached_count + 1 end
             end
         end
     end
 
-    if #accepted == 0 then return nil, _("Already cached or queued") end
+    if #accepted == 0 then
+        local code = (cached_count > 0 and queued_count == 0)
+            and "already_cached" or "already_queued"
+        return nil, code, _("Already cached or queued"),
+            { cached = cached_count, queued = queued_count }
+    end
 
     -- Optional absolute cap (default off): quota applies to the whole cache.
     if self.settings then
@@ -306,20 +326,25 @@ function Queue:enqueue(entries, opts)
             local limit = limit_mb * 1024 * 1024
             local used = self.store:total_usage().used
             if used + total > limit then
-                return nil, string.format(_("Cache limit reached: %s of %s used"),
-                    string.format("%.0f MB", used / (1024 * 1024)),
-                    string.format("%.0f MB", limit / (1024 * 1024)))
+                return nil, "cache_limit_reached",
+                    string.format(_("Cache limit reached: %s of %s used"),
+                        string.format("%.0f MB", used / (1024 * 1024)),
+                        string.format("%.0f MB", limit / (1024 * 1024))),
+                    { used = used, limit = limit, needed = total }
             end
         end
     end
 
     local available = self.store:free_bytes()
     if available and total > available then
-        return nil, string.format(_("Not enough space: unpack peak %.0f MB, %.0f MB available"),
-            total / (1024 * 1024), available / (1024 * 1024))
+        return nil, "not_enough_space",
+            string.format(_("Not enough space: unpack peak %.0f MB, %.0f MB available"),
+                total / (1024 * 1024), available / (1024 * 1024)),
+            { needed = total, available = available }
     end
     if available and available < self.LOW_WATER_BYTES then
-        return nil, _("Not enough free space to download")
+        return nil, "low_space", _("Not enough free space to download"),
+            { available = available, low_water = self.LOW_WATER_BYTES }
     end
 
     if opts.confirm then
@@ -328,7 +353,7 @@ function Queue:enqueue(entries, opts)
             bytes = total,
             available = available,
         })
-        if not ok or not confirmed then return nil, _("Download cancelled") end
+        if not ok or not confirmed then return nil, nil, _("Download cancelled") end
     end
 
     local was_empty = #self.entries == 0
@@ -393,23 +418,42 @@ end
 function Queue:cancel(server_key, chapter_id)
     local i, entry = self:_entry_index(server_key, chapter_id)
     if not i then return false end
-    if self.current == entry and self._handle then
+    local was_current = self.current == entry
+    if was_current and self._handle then
         pcall(function() self._handle.cancel() end)
         self._handle = nil
+    end
+    if was_current then
         self.current = nil
         self:_standby_off()
     end
     table.remove(self.entries, i)
+
+    if was_current then
+        -- Deleting the entry being downloaded must not strand the queue in
+        -- "downloading" with no current: schedule the next one, or go idle
+        -- when the queue is now empty (spec 07 A4).
+        if #self.entries == 0 then
+            self.state = "idle"
+            self.completed_bytes = 0
+        elseif not self.paused then
+            self.state = "queued"
+            self:_schedule(0)
+        end
+    end
+
     self:save()
     self:_changed()
     return true
 end
 
 function Queue:abort(server_key, chapter_id)
-    local i, entry = self:_entry_index(server_key, chapter_id)
+    local i = self:_entry_index(server_key, chapter_id)
     if not i then return false end
-    self:cancel(server_key, chapter_id)
+    -- Remove the part before rescheduling so the next step cannot resume from
+    -- a file this abort is deleting.
     os.remove(self.store:part_path(server_key, chapter_id))
+    self:cancel(server_key, chapter_id)
     self:_changed()
     return true
 end
