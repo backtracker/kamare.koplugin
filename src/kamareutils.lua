@@ -22,7 +22,7 @@ function Utils.joinPersonNames(persons, limit)
     if type(persons) ~= "table" then return nil end
     limit = limit or 3
     local names = {}
-    for _, p in ipairs(persons) do
+    for __, p in ipairs(persons) do
         if #names >= limit then break end
         if type(p) == "string" then
             table.insert(names, p)

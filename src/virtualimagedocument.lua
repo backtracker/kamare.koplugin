@@ -852,7 +852,7 @@ end
 
 function VirtualImageDocument:preloadDimensions(list)
     if type(list) ~= "table" then return end
-    for _, d in ipairs(list) do
+    for __, d in ipairs(list) do
         local pn = d.pageNumber or d.page or d.page_num
         local w, h = d.width, d.height
         if type(pn) == "number" and w and h and w > 0 and h > 0 then
@@ -941,7 +941,7 @@ function VirtualImageDocument:getVirtualHeight(zoom, zoom_mode, viewport_width, 
     end
 
     local total = 0
-    for _, entry in ipairs(self:_getLayoutEntries()) do
+    for __, entry in ipairs(self:_getLayoutEntries()) do
         if entry.gap_before and page_gap_height > 0 then
             total = total + page_gap_height
         end
@@ -970,7 +970,7 @@ function VirtualImageDocument:getVisiblePagesAtOffset(offset_y, viewport_height,
     local bottom = offset_y + viewport_height
     local accumulated_offset = 0
 
-    for _, entry in ipairs(self:_getLayoutEntries()) do
+    for __, entry in ipairs(self:_getLayoutEntries()) do
         local native_w, native_h = entry.native_w, entry.native_h
 
         -- Per-page zoom: in fit-width, each page zooms to fit viewport_w.
@@ -1023,7 +1023,7 @@ function VirtualImageDocument:getScrollPositionForPage(pageno, zoom, zoom_mode, 
     -- own gap is included but not its height. Past the end this returns the
     -- total virtual height, matching getVirtualHeight.
     local accumulated_offset = 0
-    for _, entry in ipairs(self:_getLayoutEntries()) do
+    for __, entry in ipairs(self:_getLayoutEntries()) do
         if entry.gap_before and page_gap_height > 0 then
             accumulated_offset = accumulated_offset + page_gap_height
         end
@@ -1045,7 +1045,7 @@ function VirtualImageDocument:getPageAtOffset(offset_y, zoom, zoom_mode, viewpor
 
     local accumulated_offset = 0
     local last_page = 1
-    for _, entry in ipairs(self:_getLayoutEntries()) do
+    for __, entry in ipairs(self:_getLayoutEntries()) do
         if entry.gap_before and page_gap_height > 0 then
             accumulated_offset = accumulated_offset + page_gap_height
         end
@@ -1117,7 +1117,7 @@ function VirtualImageDocument:_estimateTileBytes(rect, render_w, render_h)
 
     local bpp = self.render_color and 4 or 1
     local bytes = 0
-    for _, t in ipairs(tiles) do
+    for __, t in ipairs(tiles) do
         local tx = math.max(0, math.min(t.x, render_w))
         local ty = math.max(0, math.min(t.y, render_h))
         local tw = math.max(0, math.min(t.w, render_w - tx))
@@ -1152,7 +1152,7 @@ end
 -- the viewer deduplicates by physical page.
 function VirtualImageDocument:estimateBytesForPage(pageno, render_w, render_h)
     if not self._dims_cache then return 0 end
-    local _, _, full_w, full_h = self:_fullRenderDimsForPage(pageno, render_w, render_h)
+    local __, _, full_w, full_h = self:_fullRenderDimsForPage(pageno, render_w, render_h)
     if not full_w then return 0 end
     local rect = Geom:new{ x = 0, y = 0, w = full_w, h = full_h }
     return self:_estimateTileBytes(rect, full_w, full_h)
@@ -1457,7 +1457,7 @@ function VirtualImageDocument:drawPage(target, x, y, rect, pageno, zoom, page_mo
 end
 
 function VirtualImageDocument:prefetchPage(page, zoom, page_mode, render_w, render_h, render_quality)
-    local _, _, full_w, full_h = self:_fullRenderDimsForPage(page, render_w, render_h)
+    local __, _, full_w, full_h = self:_fullRenderDimsForPage(page, render_w, render_h)
     if not full_w then return 0 end
     local physical = self:getPhysicalPage(page)
     return self:_preSplitPageTiles(physical, zoom, nil, page_mode,
@@ -1488,7 +1488,7 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, tile_px, page_mod
 
     local missing = {}
 
-    for _, t in ipairs(tiles) do
+    for __, t in ipairs(tiles) do
         local key = self:_tileHash(pageno, zoom, self.gamma, t, render_quality, render_w, render_h)
         local exists = VIDCache:getNativeTile(key)
         if not (exists and exists.bb) then
@@ -1541,7 +1541,7 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, tile_px, page_mod
 
     local tiles_generated = 0
 
-    for _, t in ipairs(missing) do
+    for __, t in ipairs(missing) do
         local tx = math.max(0, math.min(t.x, render_w))
         local ty = math.max(0, math.min(t.y, render_h))
         local tw = math.max(0, math.min(t.w, render_w - tx))
@@ -1651,7 +1651,7 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ti
     local tiles = self:_computeTileRects(prefetch_rect, tp)
     local any_missing = false
 
-    for _, t in ipairs(tiles) do
+    for __, t in ipairs(tiles) do
         local key = self:_tileHash(physical, zoom, self.gamma, t, render_quality,
                                    full_render_w, full_render_h)
         if not VIDCache:getNativeTile(key) then

@@ -209,7 +209,7 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
             -- Find the matching item in item_table
             local kavita_item = nil
             if self.item_table then
-                for _, item in ipairs(self.item_table) do
+                for __, item in ipairs(self.item_table) do
                     if item.file == filepath then
                         kavita_item = item
                         break
@@ -314,7 +314,7 @@ function KavitaBrowser:_serverKeyForCurrent()
     if self.current_server_key then return self.current_server_key end
     if not self.kamare_settings then return nil end
     local entry
-    for _, s in ipairs(self.servers or {}) do
+    for __, s in ipairs(self.servers or {}) do
         if s.name == self.current_server_name
             or (self.current_server_url and (s.kavita_url == self.current_server_url
                 or s.url == self.current_server_url)) then
@@ -353,7 +353,7 @@ function KavitaBrowser:_chapterStatus(server_key, series_id, chapter)
         return _("Cached")
     end
 
-    for _, entry in ipairs(self:_queue().entries or {}) do
+    for __, entry in ipairs(self:_queue().entries or {}) do
         if entry.serverKey == server_key and entry.chapterId == chapter.id then
             if entry.state == "extracting" then return _("Extracting") end
             if entry.state == "failed" then return _("Download failed · retry") end
@@ -382,7 +382,7 @@ end
 function KavitaBrowser:_volumeStatus(server_key, series_id, volume)
     local chapters = (type(volume.chapters) == "table") and volume.chapters or {}
     local total, cached, reading, stale = 0, 0, false, false
-    for _, ch in ipairs(chapters) do
+    for __, ch in ipairs(chapters) do
         total = total + 1
         local meta = self:_store():read_meta(server_key, series_id, ch.id)
         if meta then
@@ -409,7 +409,7 @@ function KavitaBrowser:_normalizeSeriesChapters(detail)
         local bytes = 0
         local hash
         if type(ch.files) == "table" then
-            for _, f in ipairs(ch.files) do bytes = bytes + (tonumber(f.bytes) or 0) end
+            for __, f in ipairs(ch.files) do bytes = bytes + (tonumber(f.bytes) or 0) end
             hash = ch.files[1] and ch.files[1].koreaderHash
         end
         out[#out + 1] = {
@@ -433,11 +433,11 @@ function KavitaBrowser:_normalizeSeriesChapters(detail)
             files = ch.files,
         }
     end
-    for _, vol in ipairs(detail.volumes or {}) do
-        for _, ch in ipairs(vol.chapters or {}) do add(ch) end
+    for __, vol in ipairs(detail.volumes or {}) do
+        for __, ch in ipairs(vol.chapters or {}) do add(ch) end
     end
-    for _, ch in ipairs(detail.chapters or {}) do add(ch) end
-    for _, ch in ipairs(detail.specials or {}) do add(ch) end
+    for __, ch in ipairs(detail.chapters or {}) do add(ch) end
+    for __, ch in ipairs(detail.specials or {}) do add(ch) end
     table.sort(out, function(a, b)
         return (tonumber(a.order) or 0) < (tonumber(b.order) or 0)
     end)
@@ -452,7 +452,7 @@ function KavitaBrowser:_refreshSeriesCache(server_key, series_id, detail)
     -- Free fingerprint comparison while the chapter DTOs are already here.
     store:load_index_or_rebuild(server_key)
     local stale_flags = {}
-    for _, c in ipairs(chapters) do
+    for __, c in ipairs(chapters) do
         local meta = store:read_meta(server_key, series_id, c.id)
         if meta and meta.fingerprint then
             stale_flags[c.id] = meta.fingerprint ~= c.fingerprint
@@ -461,7 +461,7 @@ function KavitaBrowser:_refreshSeriesCache(server_key, series_id, detail)
     store:update_stale(server_key, stale_flags)
 
     local series_chapters = {}
-    for _, c in ipairs(chapters) do
+    for __, c in ipairs(chapters) do
         series_chapters[#series_chapters + 1] = {
             id = c.id, volumeId = c.volumeId, number = c.number, order = c.order,
             title = c.title, pages = c.pages, bytes = c.bytes,
@@ -477,7 +477,7 @@ function KavitaBrowser:_refreshSeriesCache(server_key, series_id, detail)
 end
 
 function KavitaBrowser:_decorateSeriesItems(items, server_key, series_id)
-    for _, item in ipairs(items) do
+    for __, item in ipairs(items) do
         local status
         if item.kavita_chapter and item.chapter then
             status = self:_chapterStatus(server_key, series_id, {
@@ -501,7 +501,7 @@ function KavitaBrowser:_cacheEntriesFor(chapters)
     local sid = self.current_series_id
     if not key or not sid then return {} end
     local out = {}
-    for _, c in ipairs(chapters) do
+    for __, c in ipairs(chapters) do
         if not store:has_meta(key, sid, c.id) then
             out[#out + 1] = {
                 serverKey = key,
@@ -531,11 +531,11 @@ end
 function KavitaBrowser:_queueOrRetry(entries)
     local queue = self:_queue()
     local all_queued = #entries > 0
-    for _, e in ipairs(entries) do
+    for __, e in ipairs(entries) do
         if not queue:contains(e.serverKey, e.chapterId) then all_queued = false break end
     end
     if all_queued then
-        for _, e in ipairs(entries) do queue:retry(e.serverKey, e.chapterId) end
+        for __, e in ipairs(entries) do queue:retry(e.serverKey, e.chapterId) end
         UIManager:show(InfoMessage:new{ text = _("Download queue resumed") })
         self:onCacheStateChanged()
         return
@@ -546,12 +546,12 @@ end
 function KavitaBrowser:_abortQueueFor(server_key, series_id)
     local queue = self:_queue()
     local ids = {}
-    for _, e in ipairs(queue.entries or {}) do
+    for __, e in ipairs(queue.entries or {}) do
         if e.serverKey == server_key and (not series_id or e.seriesId == series_id) then
             ids[#ids + 1] = e.chapterId
         end
     end
-    for _, id in ipairs(ids) do queue:abort(server_key, id) end
+    for __, id in ipairs(ids) do queue:abort(server_key, id) end
 end
 
 function KavitaBrowser:_confirmAndEnqueue(entries)
@@ -561,7 +561,7 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
     end
     local store = self:_store()
     local total = 0
-    for _, e in ipairs(entries) do total = total + (tonumber(e.archiveBytes) or 0) * 2.05 end
+    for __, e in ipairs(entries) do total = total + (tonumber(e.archiveBytes) or 0) * 2.05 end
     local free = store:free_bytes()
     if free and total > free then
         UIManager:show(InfoMessage:new{
@@ -660,19 +660,19 @@ function KavitaBrowser:_enqueueNextVolumes(n)
     local key = self:_server_key_for_current()
     local store = self:_store()
     local volumes = {}
-    for _, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
+    for __, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
     table.sort(volumes, function(a, b) return (tonumber(a.number) or 0) < (tonumber(b.number) or 0) end)
 
     -- Start after the last volume that already has a cached chapter.
     local start = 1
     for i, v in ipairs(volumes) do
-        for _, ch in ipairs(v.chapters or {}) do
+        for __, ch in ipairs(v.chapters or {}) do
             if store:has_meta(key, self.current_series_id, ch.id) then start = i + 1 end
         end
     end
     local chapters = {}
     for i = start, math.min(#volumes, start + n - 1) do
-        for _, ch in ipairs(volumes[i].chapters or {}) do
+        for __, ch in ipairs(volumes[i].chapters or {}) do
             chapters[#chapters + 1] = {
                 id = ch.id, volumeId = ch.volumeId, number = ch.number,
                 title = Utils.buildChapterTitle(ch), pages = ch.pages,
@@ -680,7 +680,7 @@ function KavitaBrowser:_enqueueNextVolumes(n)
                 koreaderHash = ch.files and ch.files[1] and ch.files[1].koreaderHash,
                 files = ch.files,
             }
-            for _, f in ipairs(ch.files or {}) do
+            for __, f in ipairs(ch.files or {}) do
                 chapters[#chapters].bytes = chapters[#chapters].bytes + (tonumber(f.bytes) or 0)
             end
         end
@@ -735,7 +735,7 @@ end
 function KavitaBrowser:buildCacheShelfItems()
     local store = self:_store()
     local servers, configured = {}, {}
-    for _, s in ipairs(self.servers or {}) do
+    for __, s in ipairs(self.servers or {}) do
         local key = s.key
         if not key and self.kamare_settings then
             key = store:resolve_server_key(self.kamare_settings, {
@@ -747,17 +747,17 @@ function KavitaBrowser:buildCacheShelfItems()
             servers[#servers + 1] = { key = key, name = s.name, orphan = false }
         end
     end
-    for _, key in ipairs(store:list_server_keys()) do
+    for __, key in ipairs(store:list_server_keys()) do
         if not configured[key] then
             servers[#servers + 1] = { key = key, name = T(_("Unlinked server %1"), key), orphan = true }
         end
     end
 
     local items, orphan_items = {}, {}
-    for _, srv in ipairs(servers) do
+    for __, srv in ipairs(servers) do
         local entries = store:load_index_or_rebuild(srv.key)
         local grouped, order = {}, {}
-        for _, e in ipairs(entries) do
+        for __, e in ipairs(entries) do
             local sid = e.seriesId
             if sid then
                 if not grouped[sid] then
@@ -777,7 +777,7 @@ function KavitaBrowser:buildCacheShelfItems()
                 g.lastCached = math.max(g.lastCached or 0, tonumber(e.cachedAt) or 0)
             end
         end
-        for _, sid in ipairs(order) do
+        for __, sid in ipairs(order) do
             local g = grouped[sid]
             local item = {
                 text = g.seriesName,
@@ -848,7 +848,7 @@ function KavitaBrowser:showCacheShelf(refresh_only)
     self.view_kind = "shelf"
     self.current_series_detail = nil
     if not self.current_server_key and self.kamare_settings then
-        for _, s in ipairs(self.servers or {}) do
+        for __, s in ipairs(self.servers or {}) do
             local key = s.key or self:_store():resolve_server_key(self.kamare_settings, {
                 base_url = s.kavita_url or s.url, name = s.name,
             })
@@ -876,7 +876,7 @@ function KavitaBrowser:_shelfSeriesFromIndex(server_key, series_id)
         return series
     end
     local fallback = { seriesId = series_id, chapters = {}, libraryId = nil }
-    for _, e in ipairs(store:load_index_or_rebuild(server_key)) do
+    for __, e in ipairs(store:load_index_or_rebuild(server_key)) do
         if e.seriesId == series_id then
             fallback.seriesName = fallback.seriesName or e.seriesName
             fallback.chapters[#fallback.chapters + 1] = {
@@ -905,7 +905,7 @@ function KavitaBrowser:showOfflineSeries(item)
     self.catalog_title = series.seriesName or item.text
 
     local items, cached_count = {}, 0
-    for _, c in ipairs(chapters) do
+    for __, c in ipairs(chapters) do
         local cached = store:has_meta(key, sid, c.id)
         local status = self:_chapterStatus(key, sid, c)
         if cached then cached_count = cached_count + 1 end
@@ -956,7 +956,7 @@ function KavitaBrowser:_launchLocalChapter(server_key, series_id, chapter_id)
     local store = self:_store()
     local series = store:read_series(server_key, series_id)
     local descriptor
-    for _, c in ipairs(series and series.chapters or {}) do
+    for __, c in ipairs(series and series.chapters or {}) do
         if c.id == chapter_id then descriptor = c break end
     end
     local meta = store:read_meta(server_key, series_id, chapter_id)
@@ -1022,7 +1022,7 @@ end
 
 function KavitaBrowser:_chaptersFromIndex(server_key, series_id)
     local out = {}
-    for _, e in ipairs(self:_store():load_index_or_rebuild(server_key)) do
+    for __, e in ipairs(self:_store():load_index_or_rebuild(server_key)) do
         if series_id == nil or e.seriesId == series_id then
             out[#out + 1] = {
                 serverKey = server_key, seriesId = e.seriesId, chapterId = e.chapterId,
@@ -1049,7 +1049,7 @@ function KavitaBrowser:_deleteChapters(list, opts)
     local queue = self:_queue()
     local filtered = {}
     local open_skipped = false
-    for _, c in ipairs(list or {}) do
+    for __, c in ipairs(list or {}) do
         if self:_isChapterOpen(c.serverKey, c.chapterId) then
             open_skipped = true
         else
@@ -1065,7 +1065,7 @@ function KavitaBrowser:_deleteChapters(list, opts)
     end
 
     local total, pending = 0, 0
-    for _, c in ipairs(filtered) do
+    for __, c in ipairs(filtered) do
         local meta = store:read_meta(c.serverKey, c.seriesId, c.chapterId)
         total = total + ((meta and meta.pagesBytes) or tonumber(c.bytes) or 0)
         local pos = self:_journal():get_position(c.serverKey, c.chapterId)
@@ -1089,7 +1089,7 @@ function KavitaBrowser:_deleteChapters(list, opts)
         ok_text = _("Delete"),
         ok_callback = function()
             UIManager:close(dialog)
-            for _, c in ipairs(filtered) do
+            for __, c in ipairs(filtered) do
                 if queue:contains(c.serverKey, c.chapterId) then
                     queue:abort(c.serverKey, c.chapterId)
                 end
@@ -1111,7 +1111,7 @@ function KavitaBrowser:_deleteReadInSeries()
     local sid = self.current_series_id
     if not key or not sid then return end
     local read = {}
-    for _, c in ipairs(self._series_chapters_cache or {}) do
+    for __, c in ipairs(self._series_chapters_cache or {}) do
         local meta = self:_store():read_meta(key, sid, c.id)
         if meta and self:_isChapterRead(key, sid, {
             chapterId = c.id, pagesRead = c.pagesRead,
@@ -1127,7 +1127,7 @@ end
 
 function KavitaBrowser:_deleteReadOnServer(server_key)
     local read = {}
-    for _, c in ipairs(self:_chaptersFromIndex(server_key)) do
+    for __, c in ipairs(self:_chaptersFromIndex(server_key)) do
         if self:_isChapterRead(server_key, c.seriesId, c) then read[#read + 1] = c end
     end
     self:_deleteChapters(read)
@@ -1139,7 +1139,7 @@ function KavitaBrowser:_deleteSeriesCache(server_key, series_id)
     local queue = self:_queue()
     local chapters = self:_chaptersFromIndex(server_key, series_id)
     local filtered = {}
-    for _, c in ipairs(chapters) do
+    for __, c in ipairs(chapters) do
         if not self:_isChapterOpen(server_key, c.chapterId) then filtered[#filtered + 1] = c end
     end
     if #filtered == 0 then
@@ -1148,7 +1148,7 @@ function KavitaBrowser:_deleteSeriesCache(server_key, series_id)
     end
     local usage = store:server_usage(server_key)
     local series_bytes = 0
-    for _, c in ipairs(filtered) do series_bytes = series_bytes + (tonumber(c.bytes) or 0) end
+    for __, c in ipairs(filtered) do series_bytes = series_bytes + (tonumber(c.bytes) or 0) end
     local dialog
     dialog = ConfirmBox:new{
         text = T(_("Delete all cached chapters of this series? About %1 will be freed. Progress records are kept."),
@@ -1214,7 +1214,7 @@ function KavitaBrowser:_clearAllCache()
         ok_text = _("Clear all"),
         ok_callback = function()
             UIManager:close(dialog)
-            for _, key in ipairs(keys) do
+            for __, key in ipairs(keys) do
                 self:_abortQueueFor(key, nil)
             end
             store:delete_all()
@@ -1242,7 +1242,7 @@ function KavitaBrowser:_updateCachedChapters(chapters)
         ok_text = _("Update"),
         ok_callback = function()
             UIManager:close(dialog)
-            for _, c in ipairs(chapters) do
+            for __, c in ipairs(chapters) do
                 self:_queue():abort(key, c.id)
                 store:delete_chapter(key, sid, c.id)
             end
@@ -1266,7 +1266,7 @@ function KavitaBrowser:_updateStaleInSeries()
     if not key or not sid then return end
     local store = self:_store()
     local stale = {}
-    for _, c in ipairs(self._series_chapters_cache or {}) do
+    for __, c in ipairs(self._series_chapters_cache or {}) do
         local meta = store:read_meta(key, sid, c.id)
         if meta and store:is_stale(key, sid, c.id) then stale[#stale + 1] = c end
     end
@@ -1287,12 +1287,12 @@ function KavitaBrowser:_checkForUpdates(server_key)
     UIManager:show(loading)
     UIManager:forceRePaint()
     local marked = 0
-    for _, sid in ipairs(series_ids) do
+    for __, sid in ipairs(series_ids) do
         local detail = KavitaClient:getSeriesDetail(sid)
         if type(detail) == "table" then
             local chapters = self:_normalizeSeriesChapters(detail)
             local flags = {}
-            for _, c in ipairs(chapters) do
+            for __, c in ipairs(chapters) do
                 local meta = store:read_meta(key, sid, c.id)
                 if meta and meta.fingerprint then
                     local stale = meta.fingerprint ~= c.fingerprint
@@ -1745,7 +1745,7 @@ function KavitaBrowser:performKavitaSearch(query)
 
     local series_hits = result.series or {}
     local normalized = {}
-    for _, hit in ipairs(series_hits) do
+    for __, hit in ipairs(series_hits) do
         local s = hit.series or hit
         table.insert(normalized, s)
     end
@@ -1801,7 +1801,7 @@ end
 function KavitaBrowser:buildKavitaVolumeItems(volumes)
     local items = {}
     if type(volumes) == "table" then
-        for _, v in ipairs(volumes) do
+        for __, v in ipairs(volumes) do
             local name = Utils.buildVolumeTitle(v)
             local read = v.pagesRead
             local total = v.pages
@@ -1855,7 +1855,7 @@ function KavitaBrowser:buildKavitaChapterItems(chapters, kind)
                 is_special = (kind == "special") or nil,
             }
             local cache_bytes = 0
-            for _, f in ipairs(c.files or {}) do cache_bytes = cache_bytes + (tonumber(f.bytes) or 0) end
+            for __, f in ipairs(c.files or {}) do cache_bytes = cache_bytes + (tonumber(f.bytes) or 0) end
             item._cache_bytes = cache_bytes
 
             -- Add virtual filepath (always set to prevent CoverBrowser crashes)
@@ -1898,9 +1898,9 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
     end
 
     local items = {}
-    for _, it in ipairs(self:buildKavitaVolumeItems(detail.volumes or {})) do table.insert(items, it) end
-    for _, it in ipairs(self:buildKavitaChapterItems(detail.chapters or {}, "chapter")) do table.insert(items, it) end
-    for _, it in ipairs(self:buildKavitaChapterItems(detail.specials or {}, "special")) do table.insert(items, it) end
+    for __, it in ipairs(self:buildKavitaVolumeItems(detail.volumes or {})) do table.insert(items, it) end
+    for __, it in ipairs(self:buildKavitaChapterItems(detail.chapters or {}, "chapter")) do table.insert(items, it) end
+    for __, it in ipairs(self:buildKavitaChapterItems(detail.specials or {}, "special")) do table.insert(items, it) end
 
     -- Cache integration: fingerprint staleness, series.json, row statuses.
     self.view_kind = "series"
@@ -2017,7 +2017,7 @@ function KavitaBrowser:showKavitaStream(stream_name, stream_type, stream_title, 
         -- Dedup by series id; some Kavita builds ignore the paging params
         if type(data) == "table" and #data > 0 then
             local new_count = 0
-            for _, item in ipairs(data) do
+            for __, item in ipairs(data) do
                 local id = type(item) == "table" and item.id
                 if id ~= nil then
                     if not seen_series_ids[id] then
@@ -2056,7 +2056,7 @@ function KavitaBrowser:showKavitaStream(stream_name, stream_type, stream_title, 
         series_list = data.items or data.series or data.data or data.results or data.entries
         if type(series_list) ~= "table" then
             local tmp = {}
-            for _, v in pairs(data) do
+            for __, v in pairs(data) do
                 if type(v) == "table" then
                     if v.id and (v.name or v.localizedName or v.originalName) then
                         table.insert(tmp, v)
@@ -2188,7 +2188,7 @@ function KavitaBrowser:showReadingLists()
         end
 
         if type(data) == "table" and #data > 0 then
-            for _, it in ipairs(data) do
+            for __, it in ipairs(data) do
                 table.insert(all_data, it)
             end
             if #data < page_size then
@@ -2449,7 +2449,7 @@ function KavitaBrowser:shouldUseApiKeyAuth(server_name, server_url)
 
     local servers = self.kamare_settings:readSetting("servers", {}) or {}
 
-    for _, server in ipairs(servers) do
+    for __, server in ipairs(servers) do
         if (server.url == server_url or server.name == server_name) and server.version then
             if KavitaClient:compareVersions(server.version, "0.8.9.0") >= 0 then
                 return true  -- Use API key method
@@ -2547,7 +2547,7 @@ end
 function KavitaBrowser:genItemTableFromRoot()
     local item_table = {}
     if self.servers then
-        for _, server in ipairs(self.servers) do
+        for __, server in ipairs(self.servers) do
             table.insert(item_table, buildRootEntry(server))
         end
     end
@@ -2859,7 +2859,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         if type(code) == "number" and code >= 200 and code < 300 and type(dims) == "table" then
             -- Convert possible 0-based page indices to 1-based for the viewer
             local zero_based = false
-            for _, d in ipairs(dims) do
+            for __, d in ipairs(dims) do
                 local pn = d.pageNumber or d.page or d.page_num
                 if type(pn) == "number" and pn == 0 then
                     zero_based = true
@@ -2867,7 +2867,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
                 end
             end
             if zero_based then
-                for _, d in ipairs(dims) do
+                for __, d in ipairs(dims) do
                     if type(d.pageNumber) == "number" then d.pageNumber = d.pageNumber + 1 end
                     if type(d.page) == "number" then d.page = d.page + 1 end
                     if type(d.page_num) == "number" then d.page_num = d.page_num + 1 end
@@ -2882,7 +2882,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
 
     local preloaded_iswide = {}
     if type(preloaded_dimensions) == "table" then
-        for _, d in ipairs(preloaded_dimensions) do
+        for __, d in ipairs(preloaded_dimensions) do
             local pn = d.pageNumber or d.page or d.page_num
             if type(pn) == "number" then
                 preloaded_iswide[pn] = d.isWide and true or false
@@ -2948,9 +2948,9 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
                 -- Find the chapter with matching ID
                 local next_chapter
                 if detail.volumes then
-                    for _, vol in ipairs(detail.volumes) do
+                    for __, vol in ipairs(detail.volumes) do
                         if vol.chapters then
-                            for _, ch in ipairs(vol.chapters) do
+                            for __, ch in ipairs(vol.chapters) do
                                 if ch.id == next_chapter_id then
                                     next_chapter = ch
                                     break
@@ -2961,7 +2961,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
                     end
                 end
                 if not next_chapter and detail.chapters then
-                    for _, ch in ipairs(detail.chapters) do
+                    for __, ch in ipairs(detail.chapters) do
                         if ch.id == next_chapter_id then
                             next_chapter = ch
                             break
@@ -2969,7 +2969,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
                     end
                 end
                 if not next_chapter and detail.specials then
-                    for _, ch in ipairs(detail.specials) do
+                    for __, ch in ipairs(detail.specials) do
                         if ch.id == next_chapter_id then
                             next_chapter = ch
                             break
@@ -3178,7 +3178,7 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
             return nil
         end
         local names = {}
-        for _, t in ipairs(tags) do
+        for __, t in ipairs(tags) do
             if type(t) == "table" and t.title then
                 table.insert(names, t.title)
             elseif type(t) == "string" then
@@ -3299,7 +3299,7 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
     end
 
     if #credits > 0 then
-        for _, credit in ipairs(credits) do
+        for __, credit in ipairs(credits) do
             table.insert(info_parts, credit)
         end
     end
@@ -3335,7 +3335,7 @@ function KavitaBrowser:onMenuHold(item)
                         self.current_server_key = item._cache_server_key
                         self.current_series_id = item._cache_series_id
                         local read = {}
-                        for _, c in ipairs(self:_chaptersFromIndex(item._cache_server_key, item._cache_series_id)) do
+                        for __, c in ipairs(self:_chaptersFromIndex(item._cache_server_key, item._cache_series_id)) do
                             if self:_isChapterRead(item._cache_server_key, item._cache_series_id, c) then
                                 read[#read + 1] = c
                             end
@@ -3577,7 +3577,7 @@ function KavitaBrowser:onMenuHold(item)
                         callback = function()
                             UIManager:close(dialog)
                             local bytes = 0
-                            for _, f in ipairs(chapter.files or {}) do
+                            for __, f in ipairs(chapter.files or {}) do
                                 bytes = bytes + (tonumber(f.bytes) or 0)
                             end
                             self:_queueOrRetry(self:_cacheEntriesFor({
@@ -3597,7 +3597,7 @@ function KavitaBrowser:onMenuHold(item)
                 })
             elseif cache_key and meta then
                 local bytes = 0
-                for _, f in ipairs(chapter.files or {}) do
+                for __, f in ipairs(chapter.files or {}) do
                     bytes = bytes + (tonumber(f.bytes) or 0)
                 end
                 local descriptor = {
@@ -3791,9 +3791,9 @@ function KavitaBrowser:onMenuHold(item)
             local cache_key = self:_serverKeyForCurrent()
             if cache_key then
                 local descriptors = {}
-                for _, vch in ipairs(vol.chapters or {}) do
+                for __, vch in ipairs(vol.chapters or {}) do
                     local bytes = 0
-                    for _, f in ipairs(vch.files or {}) do
+                    for __, f in ipairs(vch.files or {}) do
                         bytes = bytes + (tonumber(f.bytes) or 0)
                     end
                     descriptors[#descriptors + 1] = {
@@ -3818,7 +3818,7 @@ function KavitaBrowser:onMenuHold(item)
                     })
                 end
                 local cached_descriptors = {}
-                for _, d in ipairs(descriptors) do
+                for __, d in ipairs(descriptors) do
                     if self:_store():has_meta(cache_key, self.current_series_id, d.id) then
                         cached_descriptors[#cached_descriptors + 1] = {
                             serverKey = cache_key, seriesId = self.current_series_id,

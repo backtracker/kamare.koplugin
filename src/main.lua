@@ -12,7 +12,7 @@ do
         if lang == "zh" then
             table.insert(langs, "zh_CN")
         end
-        for _, code in ipairs(langs) do
+        for __, code in ipairs(langs) do
             local mo_path = plugin_dir .. "/l10n/" .. code .. "/kamare.mo"
             local mo_file = io.open(mo_path, "rb")
             if mo_file then

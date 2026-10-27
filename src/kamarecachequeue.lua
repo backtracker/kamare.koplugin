@@ -130,7 +130,7 @@ function Queue:load()
     if not self.settings then return true end
     local saved = self.settings:readSetting("download_queue", {})
     if type(saved) ~= "table" then return true end
-    for _, e in ipairs(saved) do
+    for __, e in ipairs(saved) do
         if type(e) == "table" and e.chapterId and e.serverKey then
             e.state = e.state or "queued"
             e.attempts = tonumber(e.attempts) or 0
@@ -179,7 +179,7 @@ function Queue:_hydrate(entry)
     entry.files = entry.files or chapter.files
 
     local bytes = 0
-    for _, f in ipairs(entry.files or {}) do
+    for __, f in ipairs(entry.files or {}) do
         bytes = bytes + (tonumber(f.bytes) or 0)
     end
     entry.archiveBytes = entry.archiveBytes or (bytes > 0 and bytes or nil)
@@ -198,7 +198,7 @@ function Queue:enqueue(entries, opts)
     if type(entries) ~= "table" or #entries == 0 then return nil, _("Nothing to download") end
 
     local accepted, seen, total = {}, {}, 0
-    for _, raw in ipairs(entries or {}) do
+    for __, raw in ipairs(entries or {}) do
         if type(raw) == "table" and raw.chapterId and raw.serverKey then
             local key = chunk_key(raw.serverKey, raw.chapterId)
             local duplicate = seen[key] or self:contains(raw.serverKey, raw.chapterId)
@@ -257,7 +257,7 @@ function Queue:enqueue(entries, opts)
     end
 
     local was_empty = #self.entries == 0
-    for _, entry in ipairs(accepted) do
+    for __, entry in ipairs(accepted) do
         self.entries[#self.entries + 1] = entry
     end
     if was_empty then self.completed_bytes = 0 end
@@ -270,7 +270,7 @@ function Queue:enqueue(entries, opts)
 end
 
 function Queue:contains(server_key, chapter_id)
-    for _, e in ipairs(self.entries) do
+    for __, e in ipairs(self.entries) do
         if e.serverKey == server_key and e.chapterId == chapter_id then return true end
     end
     return false
@@ -344,7 +344,7 @@ function Queue:remove(server_key, chapter_id)
 end
 
 function Queue:retry(server_key, chapter_id)
-    local _, entry = self:_entry_index(server_key, chapter_id)
+    local __, entry = self:_entry_index(server_key, chapter_id)
     if not entry then return false end
     entry.state = "queued"
     entry.attempts = 0
@@ -402,7 +402,7 @@ function Queue:_network_ok()
 end
 
 function Queue:_next_entry()
-    for _, e in ipairs(self.entries) do
+    for __, e in ipairs(self.entries) do
         if e.state ~= "failed" then return e end
     end
 end
@@ -574,7 +574,7 @@ function Queue:_extract_archive(entry)
 
     if self.current ~= entry then return end
     local exts = {}
-    for _, item in ipairs(result.plan or {}) do
+    for __, item in ipairs(result.plan or {}) do
         exts[item.page] = archive.page_extension(item.path)
     end
     self:_write_chapter(entry, {
@@ -743,11 +743,11 @@ function Queue:_ensure_series(entry)
     -- at least this chapter is present.
     if type(entry.seriesChapters) == "table" and #entry.seriesChapters > 0 then
         local list = {}
-        for _, c in ipairs(entry.seriesChapters) do list[#list + 1] = c end
+        for __, c in ipairs(entry.seriesChapters) do list[#list + 1] = c end
         series.chapters = list
     end
     local found = false
-    for _, c in ipairs(series.chapters) do
+    for __, c in ipairs(series.chapters) do
         if c.id == entry.chapterId then
             c.pages = entry.pages
             c.bytes = entry.archiveBytes

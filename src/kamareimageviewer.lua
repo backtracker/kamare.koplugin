@@ -764,7 +764,7 @@ end
 function KamareImageViewer:getTimeEstimate(remaining_images)
     if #self.image_viewing_times == 0 then return _("N/A") end
     local total = 0
-    for _, t in ipairs(self.image_viewing_times) do total = total + t end
+    for __, t in ipairs(self.image_viewing_times) do total = total + t end
     local average = total / #self.image_viewing_times
     local remaining = remaining_images * average
 
@@ -833,7 +833,7 @@ function KamareImageViewer:getFooterState()
         local remaining = total_pages - display_page
         if self.view_mode == 2 and self.virtual_document then
             for p = display_page + 1, total_pages do
-                local _, p_right = self.canvas:getDualPagePair(p)
+                local __, p_right = self.canvas:getDualPagePair(p)
                 if p_right == -1 then
                     remaining = remaining + 1  -- Landscape counts as 2 pages
                 end
@@ -1408,7 +1408,7 @@ function KamareImageViewer:_kickCropDetection(no_prefetch)
             select(2, self.canvas:getViewportSize()),
             self:getCurrentZoom(), self.zoom_mode,
             select(1, self.canvas:getViewportSize()), self.page_gap_height) or {}
-        for _, v in ipairs(visible) do
+        for __, v in ipairs(visible) do
             pages[#pages + 1] = v.page_num
         end
     else
@@ -1420,7 +1420,7 @@ function KamareImageViewer:_kickCropDetection(no_prefetch)
         end
     end
 
-    for _, page in ipairs(pages) do
+    for __, page in ipairs(pages) do
         self:_ensurePageReady(page, gen, nil, true)
     end
     if not no_prefetch then
@@ -2017,7 +2017,7 @@ function KamareImageViewer:_currentVisiblePages()
                 local visible = self.virtual_document:getVisiblePagesAtOffset(
                     self.scroll_offset or 0, viewport_h, zoom, self.zoom_mode,
                     viewport_w, self.page_gap_height) or {}
-                for _, vi in ipairs(visible) do
+                for __, vi in ipairs(visible) do
                     if vi.page_num then
                         pages[#pages + 1] = vi.page_num
                     end
@@ -2054,7 +2054,7 @@ function KamareImageViewer:_updateReaderContext()
     local visible = self:_currentVisiblePages()
     local cur = 0
     local vis_set = {}
-    for _, p in ipairs(visible) do
+    for __, p in ipairs(visible) do
         if p and p > 0 then
             -- Tiles and eviction are physical-keyed.
             local physical = self.virtual_document:getPhysicalPage(p)
@@ -2195,7 +2195,7 @@ function KamareImageViewer:calculateAdaptivePrefetch()
     -- Active reserve: sum bytes for the on-screen slice of each visible page.
     local active_bytes = 0
     if self.view_mode == 1 then
-        for _, v in ipairs(visible) do
+        for __, v in ipairs(visible) do
             local native_dims = self.virtual_document:getNativePageDimensions(v.page_num)
             if native_dims and native_dims.w > 0 and native_dims.h > 0
                 and v.zoom and v.zoom > 0
@@ -2392,7 +2392,7 @@ function KamareImageViewer:_netErrRate()
     local samples = self._net_samples
     if not samples or #samples == 0 then return 0 end
     local fails = 0
-    for _, s in ipairs(samples) do
+    for __, s in ipairs(samples) do
         if not s.ok then fails = fails + 1 end
     end
     return fails / #samples
@@ -2403,7 +2403,7 @@ function KamareImageViewer:_netBw()
     local samples = self._net_samples
     if not samples then return 0 end
     local sum, n = 0, 0
-    for _, s in ipairs(samples) do
+    for __, s in ipairs(samples) do
         if s.ok and s.bw > 0 then
             sum = sum + s.bw
             n = n + 1
@@ -2480,13 +2480,13 @@ function KamareImageViewer:_readLocalPage(physical)
         candidates[#candidates + 1] = recorded
         seen[recorded] = true
     end
-    for _, ext in ipairs({ "jpg", "jpeg", "png", "webp", "gif", "avif" }) do
+    for __, ext in ipairs({ "jpg", "jpeg", "png", "webp", "gif", "avif" }) do
         if not seen[ext] then
             candidates[#candidates + 1] = ext
             seen[ext] = true
         end
     end
-    for _, ext in ipairs(candidates) do
+    for __, ext in ipairs(candidates) do
         local path = self.cache_store:page_path(self.cache_server_key, meta.seriesId, meta.chapterId,
             physical, ext)
         local f = io.open(path, "rb")
@@ -2649,7 +2649,7 @@ function KamareImageViewer:_ensurePageReady(page, gen, on_done, repaint)
                 local is_visible = repaint
                     or self._pending_repaint_pages[physical]
                 if not is_visible then
-                    for _, vp in ipairs(self:_currentVisiblePages()) do
+                    for __, vp in ipairs(self:_currentVisiblePages()) do
                         if self.virtual_document:getPhysicalPage(vp) == physical then
                             is_visible = true
                             break
@@ -2734,7 +2734,7 @@ function KamareImageViewer:_prefetchStepAsync()
     if (self:_netBwFactor() < 1.0 or self:_netErrRate() > 0)
        and self._page_fetch_inflight then
         local visible_busy = false
-        for _, vp in ipairs(self:_currentVisiblePages()) do
+        for __, vp in ipairs(self:_currentVisiblePages()) do
             local physical = self.virtual_document:getPhysicalPage(vp)
             if self._page_fetch_inflight[physical] then
                 visible_busy = true
@@ -3005,7 +3005,7 @@ function KamareImageViewer:_isPageCached(page)
     local first_tile = Geom:new{ x = 0, y = 0, w = 1024, h = 1024 }
     local dims = self.virtual_document:getNativePageDimensions(page)
     local rw, rh = self.canvas:_renderDimsFor(dims.w, dims.h)
-    local _, _, full_w, full_h = self.virtual_document:_fullRenderDimsForPage(page, rw, rh)
+    local __, _, full_w, full_h = self.virtual_document:_fullRenderDimsForPage(page, rw, rh)
     local hash = self.virtual_document:_tileHash(self:_toPhysicalPage(page), zoom,
                                                   self.virtual_document.gamma, first_tile,
                                                   self.canvas.render_quality, full_w, full_h)
@@ -3174,7 +3174,7 @@ function KamareImageViewer:_localNextChapter()
     local series = self.cache_store:read_series(self.cache_server_key, meta.seriesId)
     if not series or type(series.chapters) ~= "table" then return nil, false end
     local chapters = {}
-    for _, c in ipairs(series.chapters) do chapters[#chapters + 1] = c end
+    for __, c in ipairs(series.chapters) do chapters[#chapters + 1] = c end
     table.sort(chapters, function(a, b)
         return (tonumber(a.order) or 0) < (tonumber(b.order) or 0)
     end)
