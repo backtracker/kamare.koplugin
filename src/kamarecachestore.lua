@@ -303,6 +303,7 @@ local function meta_to_index_entry(meta, stale)
     return {
         seriesId = meta.seriesId,
         seriesName = meta.seriesName,
+        libraryId = meta.libraryId,
         chapterId = meta.chapterId,
         chapterTitle = meta.chapterTitle,
         chapterNumber = meta.chapterNumber,
@@ -435,6 +436,23 @@ function Store:set_stale(server_key, series_id, chapter_id, stale)
     if not found then return false end
     self:write_index(server_key, entries)
     return true
+end
+
+-- Bulk stale update: flags = { [chapterId] = true|false }. Unknown chapters are
+-- ignored (only cached chapters can be stale).
+function Store:update_stale(server_key, flags)
+    if type(flags) ~= "table" or not next(flags) then return false end
+    local entries = self:read_index(server_key) or self:rebuild_index(server_key)
+    local changed = false
+    for _, e in ipairs(entries) do
+        local flag = flags[e.chapterId]
+        if flag ~= nil and e.stale ~= (flag and true or false) then
+            e.stale = flag and true or false
+            changed = true
+        end
+    end
+    if changed then self:write_index(server_key, entries) end
+    return changed
 end
 
 function Store:is_stale(server_key, series_id, chapter_id)

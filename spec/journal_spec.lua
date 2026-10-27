@@ -223,6 +223,17 @@ return function(t)
         t.eq(#c6.posts, 0, "keep remote does not push")
     end
 
+    -- pre-decided current-book conflict (async prompt path)
+    do
+        local j = make(t)
+        j:set_position(entry(100), 20, { source = "offline" })
+        local c = fake_client({ remote = { [100] = 60 } })
+        local s = j:sync(c, { force_current_chapter = 100 })
+        t.eq(#c.posts, 1, "forced current chapter pushes")
+        t.eq(c.posts[1].pageNum, 20, "forced page is the local one")
+        t.eq(s.pushed, 1, "forced push counted")
+    end
+
     -- sync order follows session end time
     do
         local j = make(t)

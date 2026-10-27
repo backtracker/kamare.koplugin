@@ -34,6 +34,8 @@ local KavitaBrowser = Menu:extend{
     CoverMenu = nil,
     ListMenu = nil,
     MosaicMenu = nil,
+    offline = false,
+    view_kind = nil,
 }
 
 function KavitaBrowser:init()
@@ -41,6 +43,24 @@ function KavitaBrowser:init()
 
     local is_initial_browser_startup = not self.has_initialized_before
     self.has_initialized_before = true
+
+    -- Offline entry (spec 05 A2/A4): same widget, cached data source only.
+    if self.offline then
+        self.paths = {}
+        self.view_kind = "shelf"
+        self.item_table = self:buildCacheShelfItems()
+        self.catalog_title = _("Cached")
+        self.catalog_author = self:_shelfSubtitle()
+        self.title_bar_left_icon = "appbar.menu"
+        self.onLeftButtonTap = function()
+            self:showTitleMenu()
+        end
+        if self.has_coverbrowser then
+            self:_applyCoverBrowserEnhancements()
+        end
+        Menu.init(self)
+        return
+    end
 
     if is_initial_browser_startup and self.servers and #self.servers == 1 then
         local single_server = self.servers[1]
@@ -64,6 +84,7 @@ function KavitaBrowser:init()
 
         -- Then load the server's content
         self.current_server_name = single_server.name
+        self.current_server_url = single_server.kavita_url or single_server.url
         self:authenticateAfterSelection(single_server.name, single_server.url)
         self:showDashboardAfterSelection(single_server.name)
 
@@ -251,6 +272,714 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
     self._coverbrowser_overridden = true
 end
 
+
+-- ---------------------------------------------------------------------------
+-- Offline cache helpers (spec 02/03/04/05)
+-- ---------------------------------------------------------------------------
+
+local function format_bytes(n)
+    n = tonumber(n)
+    if not n or n <= 0 then return "0 MB" end
+    if n >= 1024 * 1024 * 1024 then return string.format("%.1f GB", n / (1024 * 1024 * 1024)) end
+    if n >= 1024 * 1024 then return string.format("%.0f MB", n / (1024 * 1024)) end
+    return string.format("%.0f KB", n / 1024)
+end
+
+local function format_duration(seconds)
+    seconds = math.max(0, tonumber(seconds) or 0)
+    local h = math.floor(seconds / 3600)
+    local m = math.floor((seconds % 3600) / 60)
+    if h > 0 then return T(_("%1 h %2 min"), h, m) end
+    return T(_("%1 min"), m)
+end
+
+local function append_status(subtitle, status)
+    if not status or status == "" then return subtitle end
+    if subtitle and subtitle ~= "" then return subtitle .. " · " .. status end
+    return status
+end
+
+function KavitaBrowser:_cacheContext()
+    if self.cache and self.cache.store then return self.cache end
+    local Store = require("kamarecachestore")
+    local Journal = require("kamarejournal")
+    local Queue = require("kamarecachequeue")
+    local store = Store:new{}
+    local journal = Journal:new{ scheduler = UIManager }
+    journal:load()
+    local queue = Queue:new{
+        store = store, settings = self.kamare_settings, client = KavitaClient,
+    }
+    queue:load()
+    self.cache = { store = store, journal = journal, queue = queue }
+    return self.cache
+end
+
+function KavitaBrowser:_store() return self:_cacheContext().store end
+function KavitaBrowser:_journal() return self:_cacheContext().journal end
+function KavitaBrowser:_queue() return self:_cacheContext().queue end
+
+function KavitaBrowser:_serverKeyForCurrent()
+    if self.current_server_key then return self.current_server_key end
+    if not self.kamare_settings then return nil end
+    local entry
+    for _, s in ipairs(self.servers or {}) do
+        if s.name == self.current_server_name
+            or (self.current_server_url and (s.kavita_url == self.current_server_url
+                or s.url == self.current_server_url)) then
+            entry = s
+            break
+        end
+    end
+    if not entry then return nil end
+    self.current_server_key = self:_store():resolve_server_key(self.kamare_settings, {
+        base_url = entry.kavita_url or entry.url,
+        name = entry.name,
+    })
+    return self.current_server_key
+end
+
+function KavitaBrowser:_chapterMeta(chapter_id)
+    local key = self.current_server_key
+    local sid = self.current_series_id
+    if not key or not sid then return nil end
+    return self:_store():read_meta(key, sid, chapter_id)
+end
+
+function KavitaBrowser:_chapterStatus(server_key, series_id, chapter)
+    if not chapter or not chapter.id then return nil end
+    local store = self:_store()
+    local meta = store:read_meta(server_key, series_id, chapter.id)
+    if meta then
+        if store:is_stale(server_key, series_id, chapter.id) then return _("Needs update") end
+        local pos = self:_journal():get_position(server_key, chapter.id)
+        if pos and pos.pageNum and meta.pages then
+            if pos.pageNum >= meta.pages then return _("Read · cached") end
+            if pos.pageNum > 0 then return _("Reading · cached") end
+        elseif pos and pos.pageNum and pos.pageNum > 0 then
+            return _("Reading · cached")
+        end
+        return _("Cached")
+    end
+
+    for _, entry in ipairs(self:_queue().entries or {}) do
+        if entry.serverKey == server_key and entry.chapterId == chapter.id then
+            if entry.state == "extracting" then return _("Extracting") end
+            if entry.state == "failed" then return _("Download failed · retry") end
+            if entry.state == "downloading" or entry.state == "queued" then
+                local part = store:file_size(store:part_path(server_key, chapter.id))
+                local total = tonumber(chapter.bytes) or tonumber(entry.archiveBytes)
+                if part > 0 and total and total > 0 then
+                    return string.format("%s / %s", format_bytes(part), format_bytes(total))
+                end
+                return _("Queued")
+            end
+        end
+    end
+
+    local part = store:file_size(store:part_path(server_key, chapter.id))
+    if part > 0 then
+        local total = tonumber(chapter.bytes)
+        if total and total > 0 then
+            return string.format("%s / %s", format_bytes(part), format_bytes(total))
+        end
+        return format_bytes(part)
+    end
+    return nil
+end
+
+function KavitaBrowser:_volumeStatus(server_key, series_id, volume)
+    local chapters = (type(volume.chapters) == "table") and volume.chapters or {}
+    local total, cached, reading, stale = 0, 0, false, false
+    for _, ch in ipairs(chapters) do
+        total = total + 1
+        local meta = self:_store():read_meta(server_key, series_id, ch.id)
+        if meta then
+            cached = cached + 1
+            if self:_store():is_stale(server_key, series_id, ch.id) then stale = true end
+            local pos = self:_journal():get_position(server_key, ch.id)
+            if pos and pos.pageNum and pos.pageNum > 0 then reading = true end
+        end
+    end
+    if stale then return _("Needs update") end
+    if total > 0 and cached == total then
+        return reading and _("Reading · cached") or _("Cached")
+    end
+    if cached > 0 then return T(_("%1/%2 cached"), cached, total) end
+    return nil
+end
+
+-- Normalize SeriesDetailDto into the flat chapter list stored in series.json.
+function KavitaBrowser:_normalizeSeriesChapters(detail)
+    local out, seen = {}, {}
+    local function add(ch)
+        if type(ch) ~= "table" or not ch.id or seen[ch.id] then return end
+        seen[ch.id] = true
+        local bytes = 0
+        local hash
+        if type(ch.files) == "table" then
+            for _, f in ipairs(ch.files) do bytes = bytes + (tonumber(f.bytes) or 0) end
+            hash = ch.files[1] and ch.files[1].koreaderHash
+        end
+        out[#out + 1] = {
+            id = ch.id,
+            volumeId = ch.volumeId,
+            number = ch.number,
+            order = ch.order or ch.sortOrder or (#out + 1),
+            title = Utils.buildChapterTitle(ch),
+            pages = ch.pages,
+            bytes = bytes,
+            pagesRead = ch.pagesRead,
+            koreaderHash = hash,
+            fingerprint = string.format("%s:%s:%s",
+                tostring(ch.pages), tostring(bytes), tostring(hash)),
+            files = ch.files,
+        }
+    end
+    for _, vol in ipairs(detail.volumes or {}) do
+        for _, ch in ipairs(vol.chapters or {}) do add(ch) end
+    end
+    for _, ch in ipairs(detail.chapters or {}) do add(ch) end
+    for _, ch in ipairs(detail.specials or {}) do add(ch) end
+    table.sort(out, function(a, b)
+        return (tonumber(a.order) or 0) < (tonumber(b.order) or 0)
+    end)
+    return out
+end
+
+function KavitaBrowser:_refreshSeriesCache(server_key, series_id, detail)
+    local store = self:_store()
+    local chapters = self:_normalizeSeriesChapters(detail)
+    self._series_chapters_cache = chapters
+
+    -- Free fingerprint comparison while the chapter DTOs are already here.
+    store:load_index_or_rebuild(server_key)
+    local stale_flags = {}
+    for _, c in ipairs(chapters) do
+        local meta = store:read_meta(server_key, series_id, c.id)
+        if meta and meta.fingerprint then
+            stale_flags[c.id] = meta.fingerprint ~= c.fingerprint
+        end
+    end
+    store:update_stale(server_key, stale_flags)
+
+    local series_chapters = {}
+    for _, c in ipairs(chapters) do
+        series_chapters[#series_chapters + 1] = {
+            id = c.id, volumeId = c.volumeId, number = c.number, order = c.order,
+            title = c.title, pages = c.pages, bytes = c.bytes,
+        }
+    end
+    store:write_series(server_key, {
+        seriesId = series_id,
+        seriesName = self.catalog_title,
+        libraryId = self.current_series_library_id,
+        coverFile = "cover.jpg",
+        chapters = series_chapters,
+    })
+end
+
+function KavitaBrowser:_decorateSeriesItems(items, server_key, series_id)
+    for _, item in ipairs(items) do
+        local status
+        if item.kavita_chapter and item.chapter then
+            status = self:_chapterStatus(server_key, series_id, {
+                id = item.chapter.id,
+                pages = item.chapter.pages,
+                bytes = item._cache_bytes,
+            })
+        elseif item.kavita_volume and item.volume then
+            status = self:_volumeStatus(server_key, series_id, item.volume)
+        end
+        if status then
+            item._cache_status = status
+            item.author = append_status(item.author, status)
+        end
+    end
+end
+
+function KavitaBrowser:_cacheEntriesFor(chapters)
+    local key = self:_server_key_for_current()
+    local store = self:_store()
+    local sid = self.current_series_id
+    if not key or not sid then return {} end
+    local out = {}
+    for _, c in ipairs(chapters) do
+        if not store:has_meta(key, sid, c.id) then
+            out[#out + 1] = {
+                serverKey = key,
+                serverUrl = KavitaClient.base_url,
+                seriesId = sid,
+                seriesName = self.catalog_title,
+                libraryId = self.current_series_library_id,
+                volumeId = c.volumeId,
+                volumeName = c.volumeName,
+                chapterId = c.id,
+                chapterTitle = c.title,
+                chapterNumber = c.number,
+                order = c.order,
+                pages = c.pages,
+                archiveBytes = c.bytes,
+                archiveExt = "cbz",
+                koreaderHash = c.koreaderHash,
+                files = c.files,
+                pagesReadSnapshot = c.pagesRead,
+                seriesChapters = self._series_chapters_cache,
+            }
+        end
+    end
+    return out
+end
+
+function KavitaBrowser:_confirmAndEnqueue(entries)
+    if not entries or #entries == 0 then
+        UIManager:show(InfoMessage:new{ text = _("Everything selected is already cached") })
+        return
+    end
+    local store = self:_store()
+    local total = 0
+    for _, e in ipairs(entries) do total = total + (tonumber(e.archiveBytes) or 0) * 2.05 end
+    local free = store:free_bytes()
+    if free and total > free then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Not enough space: need about %1, %2 available"),
+                format_bytes(total), format_bytes(free)),
+        })
+        return
+    end
+
+    local dialog
+    dialog = ConfirmBox:new{
+        text = T(_("Cache %1 chapter(s), about %2 (%3 available)?"),
+            #entries, format_bytes(total), format_bytes(free or 0)),
+        ok_text = _("Download"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            local ok, err = self:_queue():enqueue(entries)
+            if not ok then
+                UIManager:show(InfoMessage:new{ text = tostring(err) })
+            else
+                UIManager:show(InfoMessage:new{ text = T(_("Queued %1 chapter(s)"), #entries) })
+                self:onCacheStateChanged()
+                self:refreshCurrentView()
+            end
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_showSeriesDownloadDialog()
+    local cache = self._series_chapters_cache
+    if not cache or #cache == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No chapters available") })
+        return
+    end
+
+    local dialog
+    local buttons = {{
+        {
+            text = _("Whole series"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_confirmAndEnqueue(self:_cacheEntriesFor(cache))
+            end,
+        },
+        {
+            text = _("From current progress"),
+            callback = function()
+                UIManager:close(dialog)
+                local start = 1
+                for i, c in ipairs(cache) do
+                    local pos = self:_journal():get_position(self:_server_keyForCurrent() or "", c.id)
+                    if (pos and pos.pageNum and pos.pageNum > 0) or (c.pagesRead and c.pagesRead > 0) then
+                        start = i
+                        break
+                    end
+                end
+                local slice = {}
+                for i = start, #cache do slice[#slice + 1] = cache[i] end
+                self:_confirmAndEnqueue(self:_cacheEntriesFor(slice))
+            end,
+        },
+    }}
+    table.insert(buttons, {
+        {
+            text = _("Next N volumes…"),
+            callback = function()
+                UIManager:close(dialog)
+                local input
+                input = InputDialog:new{
+                    title = _("Cache next N volumes"),
+                    input_hint = _("Number of volumes"),
+                    input_type = "number",
+                    buttons = {{
+                        { text = _("Cancel"), id = "close", callback = function() UIManager:close(input) end },
+                        { text = _("OK"), is_enter_default = true, callback = function()
+                            local n = tonumber(input:getInputText()) or 0
+                            UIManager:close(input)
+                            self:_enqueueNextVolumes(n)
+                        end },
+                    }},
+                }
+                UIManager:show(input)
+                input:onShowKeyboard()
+            end,
+        },
+    })
+    dialog = ButtonDialog:new{ title = _("Cache series"), title_align = "center", buttons = buttons }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_enqueueNextVolumes(n)
+    if not n or n <= 0 then return end
+    local detail = self.current_series_detail
+    if not detail then return end
+    local key = self:_server_key_for_current()
+    local store = self:_store()
+    local volumes = {}
+    for _, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
+    table.sort(volumes, function(a, b) return (tonumber(a.number) or 0) < (tonumber(b.number) or 0) end)
+
+    -- Start after the last volume that already has a cached chapter.
+    local start = 1
+    for i, v in ipairs(volumes) do
+        for _, ch in ipairs(v.chapters or {}) do
+            if store:has_meta(key, self.current_series_id, ch.id) then start = i + 1 end
+        end
+    end
+    local chapters = {}
+    for i = start, math.min(#volumes, start + n - 1) do
+        for _, ch in ipairs(volumes[i].chapters or {}) do
+            chapters[#chapters + 1] = {
+                id = ch.id, volumeId = ch.volumeId, number = ch.number,
+                title = Utils.buildChapterTitle(ch), pages = ch.pages,
+                order = ch.order, bytes = 0, pagesRead = ch.pagesRead,
+                koreaderHash = ch.files and ch.files[1] and ch.files[1].koreaderHash,
+                files = ch.files,
+            }
+            for _, f in ipairs(ch.files or {}) do
+                chapters[#chapters].bytes = chapters[#chapters].bytes + (tonumber(f.bytes) or 0)
+            end
+        end
+    end
+    self:_confirmAndEnqueue(self:_cacheEntriesFor(chapters))
+end
+
+function KavitaBrowser:_wifiOnlyEnabled()
+    if not self.kamare_settings then return true end
+    return self.kamare_settings:readSetting("download_wifi_only", true) ~= false
+end
+
+function KavitaBrowser:_setWifiOnly(enabled)
+    if not self.kamare_settings then return end
+    self.kamare_settings:saveSetting("download_wifi_only", enabled and true or false)
+    pcall(function() self.kamare_settings:flush() end)
+    UIManager:show(InfoMessage:new{
+        text = enabled and _("Downloads limited to Wi-Fi (best effort)")
+            or _("Downloads allowed on any connection"),
+    })
+end
+
+function KavitaBrowser:_shelfSubtitle()
+    local cache = self:_cacheContext()
+    local store, journal, queue = cache.store, cache.journal, cache.queue
+    local parts = {}
+    if self.offline then parts[#parts + 1] = _("Offline: showing cached series only") end
+    local usage = store:total_usage()
+    if usage.chapters > 0 then
+        parts[#parts + 1] = T(_("Used %1 · %2 free"),
+            format_bytes(usage.used), format_bytes(store:free_bytes() or 0))
+    end
+    local status = queue:status()
+    if status.pending_count and status.pending_count > 0 and queue:is_paused()
+        and status.pause_reason ~= "restored" then
+        parts[#parts + 1] = _("Downloads paused")
+    end
+    if status.state == "downloading" or status.state == "extracting" then
+        parts[#parts + 1] = T(_("Downloading %1 / %2 · %3/%4"),
+            format_bytes(status.bytes_done), format_bytes(status.bytes_total),
+            status.index, status.total)
+    end
+    local pending = journal:pending_count()
+    if pending > 0 then parts[#parts + 1] = T(_("%1 pending sync"), pending) end
+    local seconds = journal:session_seconds()
+    if seconds > 0 then
+        parts[#parts + 1] = T(_("Offline reading %1 (not counted by Kavita)"), format_duration(seconds))
+    end
+    return table.concat(parts, " · ")
+end
+
+function KavitaBrowser:buildCacheShelfItems()
+    local store = self:_store()
+    local servers, configured = {}, {}
+    for _, s in ipairs(self.servers or {}) do
+        local key = s.key
+        if not key and self.kamare_settings then
+            key = store:resolve_server_key(self.kamare_settings, {
+                base_url = s.kavita_url or s.url, name = s.name,
+            })
+        end
+        if key then
+            configured[key] = true
+            servers[#servers + 1] = { key = key, name = s.name, orphan = false }
+        end
+    end
+    for _, key in ipairs(store:list_server_keys()) do
+        if not configured[key] then
+            servers[#servers + 1] = { key = key, name = T(_("Unlinked server %1"), key), orphan = true }
+        end
+    end
+
+    local items, orphan_items = {}, {}
+    for _, srv in ipairs(servers) do
+        local entries = store:load_index_or_rebuild(srv.key)
+        local grouped, order = {}, {}
+        for _, e in ipairs(entries) do
+            local sid = e.seriesId
+            if sid then
+                if not grouped[sid] then
+                    grouped[sid] = {
+                        seriesId = sid,
+                        seriesName = e.seriesName or T(_("Series %1"), sid),
+                        libraryId = e.libraryId,
+                        chapters = 0,
+                        bytes = 0,
+                    }
+                    order[#order + 1] = sid
+                end
+                local g = grouped[sid]
+                g.chapters = g.chapters + 1
+                g.bytes = g.bytes + (tonumber(e.pagesBytes) or 0)
+            end
+        end
+        for _, sid in ipairs(order) do
+            local g = grouped[sid]
+            local item = {
+                text = g.seriesName,
+                author = T(_("%1 chapters · %2"), g.chapters, format_bytes(g.bytes)),
+                cache_shelf_series = true,
+                _cache_server_key = srv.key,
+                _cache_server_name = srv.name,
+                _cache_series_id = sid,
+                _cache_library_id = g.libraryId,
+                _cache_orphan = srv.orphan,
+                is_file = true,
+                file = string.format("/kamare/cache/%s/series/%s.kamare", srv.key, tostring(sid)),
+            }
+            if srv.orphan then orphan_items[#orphan_items + 1] = item
+            else items[#items + 1] = item end
+        end
+    end
+
+    table.sort(items, function(a, b) return (a.text or "") < (b.text or "") end)
+    table.sort(orphan_items, function(a, b) return (a.text or "") < (b.text or "") end)
+    if #orphan_items > 0 then
+        items[#items + 1] = {
+            text = T(_("Unlinked servers (%1)"), #orphan_items),
+            cache_orphan_group = true,
+            _orphan_items = orphan_items,
+            select_enabled = true,
+        }
+    end
+
+    local queue_status = self:_queue():status()
+    if queue_status.pending_count and queue_status.pending_count > 0 then
+        table.insert(items, 1, {
+            text = T(_("%1 unfinished download(s) · tap to continue"), queue_status.pending_count),
+            author = self:_queue():is_paused() and _("Paused") or _("Queued"),
+            cache_resume_downloads = true,
+        })
+    end
+
+    if #items == 0 or (#items == 1 and items[1].cache_resume_downloads) then
+        local resume = items[1]
+        items = {}
+        if resume then items[1] = resume end
+        items[#items + 1] = {
+            text = _("No cached chapters · cache some to read offline"),
+            select_enabled = false,
+            mandatory = "",
+        }
+        if not self.offline then
+            items[#items + 1] = { text = _("Go browse"), cache_go_browse = true }
+        end
+    end
+    return items
+end
+
+function KavitaBrowser:showCacheShelf(refresh_only)
+    self.view_kind = "shelf"
+    self.current_series_detail = nil
+    self.offline_shelf = self.offline
+    self.catalog_title = _("Cached")
+    self.catalog_author = self:_shelfSubtitle()
+    if not refresh_only then
+        self.paths = self.paths or {}
+        table.insert(self.paths, { kavita_cache_shelf = true, title = self.catalog_title })
+    end
+    self:switchItemTable(self.catalog_title, self:buildCacheShelfItems(), refresh_only and -1 or nil,
+        nil, self.catalog_author)
+    self:setTitleBarLeftIcon("appbar.menu")
+    self.onLeftButtonTap = function() self:showTitleMenu() end
+end
+
+function KavitaBrowser:_shelfSeriesFromIndex(server_key, series_id)
+    local store = self:_store()
+    local series = store:read_series(server_key, series_id)
+    if series and type(series.chapters) == "table" and #series.chapters > 0 then
+        return series
+    end
+    local fallback = { seriesId = series_id, chapters = {}, libraryId = nil }
+    for _, e in ipairs(store:load_index_or_rebuild(server_key)) do
+        if e.seriesId == series_id then
+            fallback.seriesName = fallback.seriesName or e.seriesName
+            fallback.chapters[#fallback.chapters + 1] = {
+                id = e.chapterId, volumeId = nil, number = e.chapterNumber,
+                order = e.order, title = e.chapterTitle, pages = e.pages, bytes = e.archiveBytes,
+            }
+        end
+    end
+    return fallback
+end
+
+function KavitaBrowser:showOfflineSeries(item)
+    local store = self:_store()
+    local key = item._cache_server_key
+    local sid = item._cache_series_id
+    local series = self:_shelfSeriesFromIndex(key, sid)
+    local chapters = series.chapters or {}
+    table.sort(chapters, function(a, b) return (tonumber(a.order) or 0) < (tonumber(b.order) or 0) end)
+
+    self.view_kind = "offline_series"
+    self.current_series_detail = nil
+    self.current_server_key = key
+    self.current_series_id = sid
+    self.current_series_library_id = series.libraryId or item._cache_library_id
+    self.current_series_names = { name = series.seriesName or item.text }
+    self.catalog_title = series.seriesName or item.text
+
+    local items, cached_count = {}, 0
+    for _, c in ipairs(chapters) do
+        local cached = store:has_meta(key, sid, c.id)
+        local status = self:_chapterStatus(key, sid, c)
+        if cached then cached_count = cached_count + 1 end
+        items[#items + 1] = {
+            text = c.title or tostring(c.number or c.id),
+            author = cached and status or _("Not cached"),
+            cache_offline_chapter = true,
+            _cache_server_key = key,
+            _cache_series_id = sid,
+            _chapter_id = c.id,
+            chapter = {
+                id = c.id, pages = c.pages, volumeId = c.volumeId,
+                number = c.number, titleName = c.title, order = c.order,
+                pagesRead = 0,
+            },
+            select_enabled = cached or false,
+            is_file = true,
+            file = string.format("/kamare/cache/%s/series/%s/chapter/%s.kamare",
+                key, tostring(sid), tostring(c.id)),
+        }
+    end
+    self.catalog_author = T(_("%1/%2 chapters cached"), cached_count, #chapters)
+
+    self.paths = self.paths or {}
+    table.insert(self.paths, {
+        kavita_offline_series = { serverKey = key, seriesId = sid },
+        title = self.catalog_title,
+    })
+    self:switchItemTable(self.catalog_title, items, nil, nil, self.catalog_author)
+    self:setTitleBarLeftIcon("appbar.menu")
+    self.onLeftButtonTap = function() self:showTitleMenu() end
+end
+
+function KavitaBrowser:_showOrphanGroup(item)
+    self.view_kind = "orphan_group"
+    self.current_series_detail = nil
+    self.catalog_title = item.text
+    self.catalog_author = nil
+    self._orphan_items = item._orphan_items
+    self.paths = self.paths or {}
+    table.insert(self.paths, { kavita_orphan_group = true, title = item.text })
+    self:switchItemTable(self.catalog_title, item._orphan_items or {}, nil, nil, nil)
+    self:setTitleBarLeftIcon("appbar.menu")
+    self.onLeftButtonTap = function() self:showTitleMenu() end
+end
+
+function KavitaBrowser:_launchLocalChapter(server_key, series_id, chapter_id)
+    local store = self:_store()
+    local series = store:read_series(server_key, series_id)
+    local descriptor
+    for _, c in ipairs(series and series.chapters or {}) do
+        if c.id == chapter_id then descriptor = c break end
+    end
+    local meta = store:read_meta(server_key, series_id, chapter_id)
+    if not meta then
+        UIManager:show(InfoMessage:new{ text = _("Not cached · connect to continue") })
+        return
+    end
+    self.current_server_key = server_key
+    self.current_series_id = series_id
+    self.current_series_library_id = meta.libraryId
+    self.current_series_names = { name = meta.seriesName }
+    local chapter = {
+        id = chapter_id,
+        pages = meta.pages,
+        volumeId = meta.volumeId,
+        number = meta.chapterNumber,
+        titleName = meta.chapterTitle,
+        order = meta.order,
+        pagesRead = meta.pagesReadSnapshot,
+        _from_cache = true,
+    }
+    -- Let the currently open viewer close itself first (singleton guard).
+    UIManager:nextTick(function()
+        self:launchKavitaChapterViewer(chapter, meta.seriesName or self.catalog_title, false)
+    end)
+end
+
+function KavitaBrowser:onCacheStateChanged()
+    if self.view_kind == "shelf" then
+        UIManager:nextTick(function()
+            if self.view_kind == "shelf" then self:showCacheShelf(true) end
+        end)
+    end
+end
+
+function KavitaBrowser:onCacheChapterDone()
+    if self.view_kind == "series" then
+        self:refreshCurrentView()
+    elseif self.view_kind == "shelf" then
+        self:showCacheShelf(true)
+    end
+end
+
+function KavitaBrowser:_syncNow()
+    if self.offline or NetworkMgr:isOnline() == false then
+        UIManager:show(InfoMessage:new{ text = _("Offline · progress will sync after reconnecting") })
+        return
+    end
+    local active = KamareImageViewer.active_instance
+    local current_id = active and active.metadata
+        and (active.metadata.chapterId or active.metadata.chapter_id) or nil
+    local loading = InfoMessage:new{ text = _("Syncing reading progress…"), timeout = 0 }
+    UIManager:show(loading)
+    UIManager:forceRePaint()
+    local ok, summary = pcall(self:_journal().sync, self:_journal(), KavitaClient, {
+        force_current_chapter = current_id,
+    })
+    UIManager:close(loading)
+    if not ok or not summary then
+        UIManager:show(InfoMessage:new{ text = _("Sync failed") })
+        return
+    end
+    UIManager:show(InfoMessage:new{
+        text = T(_("Synced: %1 pushed, %2 superseded, %3 failed, %4 skipped"),
+            summary.pushed, summary.superseded, summary.failed, summary.skipped),
+    })
+    if self.view_kind == "shelf" then self:showCacheShelf(true) end
+end
+
 function KavitaBrowser:showTitleMenu()
     local dialog
     local buttons = {}
@@ -265,6 +994,56 @@ function KavitaBrowser:showTitleMenu()
             end,
             align = "left",
         }})
+    end
+
+    if not self.offline then
+        table.insert(buttons, {{
+            text = _("Cached chapters"),
+            callback = function()
+                UIManager:close(dialog)
+                self:showCacheShelf()
+            end,
+            align = "left",
+        }})
+        table.insert(buttons, {{
+            text = _("Sync progress now"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_syncNow()
+            end,
+            align = "left",
+        }})
+        local queue = self:_queue()
+        if #queue.entries > 0 then
+            table.insert(buttons, {{
+                text = queue:is_paused() and _("Resume downloads") or _("Pause downloads"),
+                callback = function()
+                    UIManager:close(dialog)
+                    if queue:is_paused() then queue:resume() else queue:pause("user") end
+                    if self.view_kind == "shelf" then self:showCacheShelf(true) end
+                end,
+                align = "left",
+            }})
+        end
+        table.insert(buttons, {{
+            text = self:_wifiOnlyEnabled() and _("Download over Wi-Fi only: on")
+                or _("Download over Wi-Fi only: off"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_setWifiOnly(not self:_wifiOnlyEnabled())
+            end,
+            align = "left",
+        }})
+        if self.current_series_detail then
+            table.insert(buttons, {{
+                text = _("Cache entire series…"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:_showSeriesDownloadDialog()
+                end,
+                align = "left",
+            }})
+        end
     end
 
     table.insert(buttons, {{
@@ -380,6 +1159,8 @@ function KavitaBrowser:showDashboardAfterSelection(server_name)
     end
 
     local items = self:buildKavitaDashboardItems(data)
+    self.view_kind = "dashboard"
+    self.current_series_detail = nil
     self.catalog_title = server_name
     self.search_url = nil
 
@@ -552,6 +1333,9 @@ function KavitaBrowser:buildKavitaChapterItems(chapters, kind)
                 chapter = c,
                 is_special = (kind == "special") or nil,
             }
+            local cache_bytes = 0
+            for _, f in ipairs(c.files or {}) do cache_bytes = cache_bytes + (tonumber(f.bytes) or 0) end
+            item._cache_bytes = cache_bytes
 
             -- Add virtual filepath (always set to prevent CoverBrowser crashes)
             if c.id then
@@ -596,6 +1380,16 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
     for _, it in ipairs(self:buildKavitaVolumeItems(detail.volumes or {})) do table.insert(items, it) end
     for _, it in ipairs(self:buildKavitaChapterItems(detail.chapters or {}, "chapter")) do table.insert(items, it) end
     for _, it in ipairs(self:buildKavitaChapterItems(detail.specials or {}, "special")) do table.insert(items, it) end
+
+    -- Cache integration: fingerprint staleness, series.json, row statuses.
+    self.view_kind = "series"
+    self.current_series_detail = detail
+    self._series_chapters_cache = nil
+    local cache_key = self:_serverKeyForCurrent()
+    if cache_key then
+        self:_refreshSeriesCache(cache_key, series_id, detail)
+        self:_decorateSeriesItems(items, cache_key, series_id)
+    end
 
     self.catalog_title = series_name or _("Series")
     self.search_url = nil
@@ -650,6 +1444,8 @@ end
 -- stream_title: optional display title for the stream
 -- smart_filter_encoded: optional smartFilterEncoded for smart filters
 function KavitaBrowser:showKavitaStream(stream_name, stream_type, stream_title, smart_filter_encoded)
+    self.view_kind = "stream"
+    self.current_series_detail = nil
     local loading = InfoMessage:new{ text = T(_("Loading %1…"), stream_title or _("stream")), timeout = 0 }
     UIManager:show(loading)
     UIManager:forceRePaint()
@@ -847,6 +1643,8 @@ end
 -- Fetch and display all of the user's reading lists.
 -- Mirrors the pagination loop in showKavitaStream.
 function KavitaBrowser:showReadingLists()
+    self.view_kind = "reading_lists"
+    self.current_series_detail = nil
     local loading = InfoMessage:new{ text = _("Loading reading lists…"), timeout = 0 }
     UIManager:show(loading)
     UIManager:forceRePaint()
@@ -985,6 +1783,8 @@ end
 -- Fetch and display the items of a single reading list.
 -- opts.refresh_only: when true, do not push a new path entry (used by close/refresh callbacks)
 function KavitaBrowser:showReadingListDetail(reading_list_id, reading_list_title, opts)
+    self.view_kind = "reading_list"
+    self.current_series_detail = nil
     local loading = InfoMessage:new{ text = T(_("Loading %1…"), reading_list_title or _("reading list")), timeout = 0 }
     UIManager:show(loading)
     UIManager:forceRePaint()
@@ -1175,6 +1975,9 @@ function KavitaBrowser:authenticateAfterSelection(server_name, server_url)
         return
     end
 
+    self.current_server_url = base_url
+    self.current_server_key = nil
+
     -- Keep client api_key for endpoints that require it as query param
     KavitaClient.api_key = apiKey
     KavitaClient.base_url = base_url
@@ -1359,6 +2162,23 @@ end
 -- refreshed (reading list vs. series detail) instead of always jumping to
 -- series detail.
 function KavitaBrowser:refreshCurrentView()
+    if self.view_kind == "shelf" then
+        self:showCacheShelf(true)
+        return
+    end
+    if self.view_kind == "offline_series" then
+        local top = self.paths and self.paths[#self.paths]
+        if top and top.kavita_offline_series then
+            self.paths = self.paths or {}
+            table.remove(self.paths)
+            self:showOfflineSeries({
+                _cache_server_key = top.kavita_offline_series.serverKey,
+                _cache_series_id = top.kavita_offline_series.seriesId,
+                text = top.title,
+            })
+            return
+        end
+    end
     local top = self.paths and self.paths[#self.paths]
     if top and top.kavita_reading_list_root then
         UIManager:nextTick(function()
@@ -1392,7 +2212,21 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         return
     end
 
-    local pages = chapter.pages or (chapter.files and #chapter.files) or 0
+    local cache_key = self:_serverKeyForCurrent()
+    local cache_store = self:_store()
+    local series_id = chapter.seriesId or self.current_series_id
+    local local_meta
+    if cache_key and series_id then
+        local_meta = cache_store:read_meta(cache_key, series_id, chapter.id)
+    end
+    local local_mode = local_meta ~= nil or self.offline == true
+    if local_mode and not local_meta then
+        UIManager:show(InfoMessage:new{ text = _("Not cached · connect to download") })
+        return
+    end
+
+    local pages = (local_meta and local_meta.pages)
+        or chapter.pages or (chapter.files and #chapter.files) or 0
     if pages <= 0 then
         local message = is_volume and _("This volume has no pages to display") or _("This chapter has no pages to display")
         UIManager:show(InfoMessage:new{ text = message })
@@ -1410,9 +2244,17 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
     -- Keep lazy 1-based images list; client converts to 0-based for API
     local images_list_data = page_table
 
-    -- Convert Kavita's pagesRead (count of pages read) to next 1-based page
+    -- Start page priority (05 A5): journal position > cached snapshot > pagesRead.
     local start_page = 1
-    if type(chapter.pagesRead) == "number" then
+    if local_meta then
+        local pos = self:_journal():get_position(cache_key, chapter.id)
+        local pr = pos and tonumber(pos.pageNum)
+        if pr and pr > 0 then
+            start_page = math.min(pr, pages)
+        elseif tonumber(local_meta.pagesReadSnapshot or 0) > 0 then
+            start_page = math.min(local_meta.pagesReadSnapshot, pages)
+        end
+    elseif type(chapter.pagesRead) == "number" then
         local pr = math.max(0, math.floor(chapter.pagesRead))
         if pr >= pages then
             start_page = pages
@@ -1470,10 +2312,31 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         startPage     = start_page,
 
         content_type  = content_type,
+
+        -- Cache identity / offline metadata
+        serverKey     = cache_key,
+        chapterTitle  = (local_meta and local_meta.chapterTitle) or chapter.titleName,
+        offline       = self.offline == true,
     }
 
 
     local preloaded_dimensions
+    if local_meta then
+        preloaded_dimensions = {}
+        if #(local_meta.dims or {}) < pages then
+            UIManager:show(InfoMessage:new{
+                text = _("Cached metadata is incomplete · reconnect to refresh this chapter"),
+                timeout = 3,
+            })
+        end
+        for i, d in ipairs(local_meta.dims or {}) do
+            local w, h = d[1] or 0, d[2] or 0
+            preloaded_dimensions[i] = {
+                pageNumber = i, width = w, height = h, isWide = w > h,
+                fileName = string.format("%04d.jpg", i),
+            }
+        end
+    else
     do
         local dims, code = KavitaClient:getFileDimensions(chapter.id)
         if type(code) == "number" and code >= 200 and code < 300 and type(dims) == "table" then
@@ -1498,6 +2361,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
             logger.warn("KavitaBrowser: getFileDimensions failed:", code)
         end
     end
+    end
 
     local preloaded_iswide = {}
     if type(preloaded_dimensions) == "table" then
@@ -1521,10 +2385,27 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         metadata = metadata,
         kamare_settings = self.kamare_settings,
         override_view_mode = override_view_mode,
+        page_source = local_mode and "local" or "network",
+        offline = self.offline == true,
+        local_meta = local_meta,
+        cache_store = local_mode and cache_store or nil,
+        cache_server_key = cache_key,
+        cache_journal = local_mode and self:_journal() or nil,
         on_close_callback = function(current_page, total_pages)
             self:refreshCurrentView()
         end,
         on_next_chapter_callback = function(next_chapter_id)
+            -- Cached chapter: open locally, no network at all.
+            local next_key = self:_serverKeyForCurrent()
+            if next_key and self.current_series_id
+                and self:_store():has_meta(next_key, self.current_series_id, next_chapter_id) then
+                self:_launchLocalChapter(next_key, self.current_series_id, next_chapter_id)
+                return
+            end
+            if self.offline then
+                UIManager:show(InfoMessage:new{ text = _("Not cached · connect to continue") })
+                return
+            end
             -- Fetch the next chapter details and launch viewer
             UIManager:nextTick(function()
                 local next_loading = InfoMessage:new{ text = _("Loading next chapter…"), timeout = 0 }
@@ -1610,6 +2491,44 @@ end
 
 -- Menu action on item tap (Stream a book / Show subcatalog / Search in catalog)
 function KavitaBrowser:onMenuSelect(item)
+    if item.cache_resume_downloads then
+        self:_queue():resume()
+        UIManager:show(InfoMessage:new{ text = _("Download queue resumed") })
+        self:showCacheShelf(true)
+        return true
+    end
+    if item.cache_orphan_group then
+        self:_showOrphanGroup(item)
+        return true
+    end
+    if item.cache_go_browse then
+        if self.offline then
+            UIManager:show(InfoMessage:new{ text = _("Connect to browse the server") })
+        else
+            self:init()
+        end
+        return true
+    end
+    if item.cache_shelf_series then
+        self.current_server_key = item._cache_server_key
+        if self.offline or item._cache_orphan then
+            self:showOfflineSeries(item)
+        else
+            self.current_server_name = item._cache_server_name
+            self:showSeriesDetail(item.text, item._cache_series_id, item._cache_library_id)
+        end
+        return true
+    end
+    if item.cache_offline_chapter then
+        local store = self:_store()
+        if store:has_meta(item._cache_server_key, item._cache_series_id, item._chapter_id) then
+            self:_launchLocalChapter(item._cache_server_key, item._cache_series_id, item._chapter_id)
+        else
+            UIManager:show(InfoMessage:new{ text = _("Not cached · connect to download") })
+        end
+        return true
+    end
+
     -- Only Kavita items are supported
     if item.kavita_chapter and item.chapter and item.chapter.id then
         -- Reading-list chapter items: stash series context so the viewer can
@@ -1700,6 +2619,8 @@ function KavitaBrowser:onMenuSelect(item)
 
     if #self.paths == 0 then -- root list
         self.current_server_name    = item.text
+        self.current_server_url     = item.url
+        self.current_server_key     = nil
         self:authenticateAfterSelection(item.text, item.url)
         self:showDashboardAfterSelection(item.text)
         return true
@@ -2086,6 +3007,37 @@ function KavitaBrowser:onMenuHold(item)
             },
         })
 
+        do
+            local cache_key = self:_serverKeyForCurrent()
+            if cache_key and not self:_store():has_meta(cache_key, self.current_series_id, chapter.id) then
+                table.insert(buttons, {})
+                table.insert(buttons, {
+                    {
+                        text = "\u{2913} " .. _("Download chapter"),
+                        callback = function()
+                            UIManager:close(dialog)
+                            local bytes = 0
+                            for _, f in ipairs(chapter.files or {}) do
+                                bytes = bytes + (tonumber(f.bytes) or 0)
+                            end
+                            self:_confirmAndEnqueue(self:_cacheEntriesFor({
+                                {
+                                    id = chapter.id, volumeId = chapter.volumeId,
+                                    number = chapter.number,
+                                    title = Utils.buildChapterTitle(chapter),
+                                    pages = pages, order = chapter.order,
+                                    bytes = bytes, pagesRead = chapter.pagesRead,
+                                    koreaderHash = chapter.files and chapter.files[1]
+                                        and chapter.files[1].koreaderHash,
+                                    files = chapter.files,
+                                },
+                            }))
+                        end,
+                    },
+                })
+            end
+        end
+
         dialog = ButtonDialog:new{
             title = item.text,
             title_align = "center",
@@ -2231,6 +3183,39 @@ function KavitaBrowser:onMenuHold(item)
             },
         })
 
+        do
+            local cache_key = self:_serverKeyForCurrent()
+            if cache_key then
+                local descriptors = {}
+                for _, vch in ipairs(vol.chapters or {}) do
+                    local bytes = 0
+                    for _, f in ipairs(vch.files or {}) do
+                        bytes = bytes + (tonumber(f.bytes) or 0)
+                    end
+                    descriptors[#descriptors + 1] = {
+                        id = vch.id, volumeId = vch.volumeId, number = vch.number,
+                        title = Utils.buildChapterTitle(vch), pages = vch.pages,
+                        order = vch.order, bytes = bytes, pagesRead = vch.pagesRead,
+                        koreaderHash = vch.files and vch.files[1] and vch.files[1].koreaderHash,
+                        files = vch.files,
+                    }
+                end
+                local entries = self:_cacheEntriesFor(descriptors)
+                if #entries > 0 then
+                    table.insert(buttons, {})
+                    table.insert(buttons, {
+                        {
+                            text = "\u{2913} " .. _("Download volume"),
+                            callback = function()
+                                UIManager:close(dialog)
+                                self:_confirmAndEnqueue(entries)
+                            end,
+                        },
+                    })
+                end
+            end
+        end
+
         dialog = ButtonDialog:new{
             title = item.text,
             title_align = "center",
@@ -2287,7 +3272,17 @@ function KavitaBrowser:onReturn()
     if path then
         self.catalog_title = path.title
         self.catalog_author = path.author
-        if path.kavita_stream_root then
+        if path.kavita_cache_shelf then
+            self:showCacheShelf(true)
+        elseif path.kavita_offline_series then
+            self:showOfflineSeries({
+                _cache_server_key = path.kavita_offline_series.serverKey,
+                _cache_series_id = path.kavita_offline_series.seriesId,
+                text = path.title,
+            })
+        elseif path.kavita_orphan_group then
+            self:_showOrphanGroup({ text = path.title, _orphan_items = self._orphan_items })
+        elseif path.kavita_stream_root then
             -- return to the last stream list
             self:showKavitaStream(
                 path.kavita_stream_root,

@@ -89,6 +89,12 @@ return function(t)
     local rebuilt = store:rebuild_index(sk)
     t.eq(rebuilt[1].stale, true, "stale preserved across rebuild")
 
+    -- bulk stale update
+    t.ok(store:update_stale(sk, { [cid] = false }), "bulk stale clear")
+    t.ok(not store:is_stale(sk, sid, cid), "bulk stale cleared")
+    t.ok(store:update_stale(sk, { [cid] = true }), "bulk stale update")
+    t.ok(store:is_stale(sk, sid, cid), "bulk stale applied")
+
     -- index is written atomically + sorted deterministically
     assert(store:write_index(sk, {
         { chapterId = 2, seriesName = "B", order = 1 },

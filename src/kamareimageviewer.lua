@@ -227,6 +227,24 @@ function KamareImageViewer:init()
     end
 
     self:_initDocument()
+
+    -- Offline reading session: local-only record (never pushed to Kavita).
+    if self.cache_journal and self.metadata and self.page_source == "local" then
+        self.cache_identity = {
+            serverKey = self.cache_server_key,
+            libraryId = self.metadata.libraryId,
+            seriesId = self.metadata.seriesId,
+            volumeId = self.metadata.volumeId,
+            chapterId = self.metadata.chapterId,
+            seriesName = self.metadata.seriesName,
+            chapterTitle = self.metadata.chapterTitle,
+        }
+        if self.offline then
+            self.cache_journal:session_start(self.cache_identity, self.metadata.startPage or 1,
+                { source = "offline" })
+        end
+    end
+
     self:_initCanvas()
     self:_setupStatisticsInterface()
 
@@ -2449,6 +2467,39 @@ end
 -- being exhausted mark the page failed. `gen` is the generation token; stale
 -- results (chapter change / close) are discarded. `on_done()` is always called
 -- once (after the final outcome, including all retries).
+-- Read a cached page straight from disk. Tries the extension recorded at
+-- extraction time, then the common image extensions as a fallback.
+function KamareImageViewer:_readLocalPage(physical)
+    if not (self.cache_store and self.local_meta and self.cache_server_key) then
+        return nil
+    end
+    local meta = self.local_meta
+    local candidates, seen = {}, {}
+    local recorded = meta.pageExts and (meta.pageExts[physical] or meta.pageExts[tostring(physical)])
+    if recorded then
+        candidates[#candidates + 1] = recorded
+        seen[recorded] = true
+    end
+    for _, ext in ipairs({ "jpg", "jpeg", "png", "webp", "gif", "avif" }) do
+        if not seen[ext] then
+            candidates[#candidates + 1] = ext
+            seen[ext] = true
+        end
+    end
+    for _, ext in ipairs(candidates) do
+        local path = self.cache_store:page_path(self.cache_server_key, meta.seriesId, meta.chapterId,
+            physical, ext)
+        local f = io.open(path, "rb")
+        if f then
+            local body = f:read("*a")
+            f:close()
+            if body and #body > 0 then return body end
+        end
+    end
+    logger.warn("[kamare:cache] local page missing", physical, meta.chapterId)
+    return nil
+end
+
 function KamareImageViewer:_ensurePageReady(page, gen, on_done, repaint)
     on_done = on_done or function() end
 
@@ -2491,6 +2542,25 @@ function KamareImageViewer:_ensurePageReady(page, gen, on_done, repaint)
     if self.virtual_document:isRawBodyReady(physical) then
         logger.dbg(string.format("[kamare:render] page=%d physical=%d ensure skip (ready)", page, physical))
         if crop_pending then
+            page = self:_applyCropDetection(physical, page)
+        end
+        local native_dims = self.virtual_document:getNativePageDimensions(page)
+        local rw, rh = self.canvas:_renderDimsFor(native_dims.w, native_dims.h)
+        self.virtual_document:prefetchPage(page, zoom, pm, rw, rh, self.canvas.render_quality)
+        on_done()
+        return
+    end
+
+    -- Local source: read the cached page synchronously, never touch the network.
+    if self.page_source == "local" then
+        local body = self:_readLocalPage(physical)
+        if not body then
+            self._page_fetch_failed[physical] = true
+            on_done()
+            return
+        end
+        self.virtual_document:injectRawBody(physical, body)
+        if self.virtual_document:needsCropDetection(physical) then
             page = self:_applyCropDetection(physical, page)
         end
         local native_dims = self.virtual_document:getNativePageDimensions(page)
@@ -3097,11 +3167,101 @@ function KamareImageViewer:onShowPrevSlice()
     self:_scrollStep(-1)
 end
 
+-- Offline: next chapter comes from series.json order, never from the network.
+function KamareImageViewer:_localNextChapter()
+    local meta = self.local_meta
+    if not meta or not self.cache_store or not self.cache_server_key then return nil, false end
+    local series = self.cache_store:read_series(self.cache_server_key, meta.seriesId)
+    if not series or type(series.chapters) ~= "table" then return nil, false end
+    local chapters = {}
+    for _, c in ipairs(series.chapters) do chapters[#chapters + 1] = c end
+    table.sort(chapters, function(a, b)
+        return (tonumber(a.order) or 0) < (tonumber(b.order) or 0)
+    end)
+    local index
+    for i, c in ipairs(chapters) do
+        if c.id == meta.chapterId then index = i break end
+    end
+    if not index then return nil, false end
+    local next_chapter = chapters[index + 1]
+    if not next_chapter then return nil, false end
+    local cached = self.cache_store:has_meta(self.cache_server_key, meta.seriesId, next_chapter.id)
+    return next_chapter, cached
+end
+
+function KamareImageViewer:_offerLocalNextChapter()
+    local is_auto = self.chapter_end_behavior == 2
+    local next_chapter, cached = self:_localNextChapter()
+
+    if not next_chapter then
+        if is_auto then
+            UIManager:show(InfoMessage:new{
+                text = _("You've reached the end of the series"), timeout = 3,
+            })
+        else
+            self.next_chapter_dialog = ButtonDialog:new{
+                title = _("You've reached the end of the series"),
+                title_align = "center",
+                buttons = {{
+                    { text = _("Close"), callback = function()
+                        UIManager:close(self.next_chapter_dialog)
+                        self.next_chapter_dialog = nil
+                        self:onClose()
+                    end },
+                }},
+            }
+            UIManager:show(self.next_chapter_dialog)
+        end
+        return true
+    end
+
+    if not cached then
+        if self.offline then
+            UIManager:show(InfoMessage:new{
+                text = _("Not cached · connect to continue"),
+                timeout = 3,
+            })
+            return true
+        end
+        return false -- online: use the normal network next-chapter path
+    end
+
+    if is_auto then
+        if self.on_next_chapter_callback then self.on_next_chapter_callback(next_chapter.id) end
+        self:onClose()
+        return true
+    end
+
+    self.next_chapter_dialog = ButtonDialog:new{
+        title = _("Continue to next chapter?"),
+        title_align = "center",
+        buttons = {{
+            { text = _("Close"), callback = function()
+                UIManager:close(self.next_chapter_dialog)
+                self.next_chapter_dialog = nil
+                self:onClose()
+            end },
+            { text = _("Continue"), callback = function()
+                UIManager:close(self.next_chapter_dialog)
+                self.next_chapter_dialog = nil
+                if self.on_next_chapter_callback then self.on_next_chapter_callback(next_chapter.id) end
+                self:onClose()
+            end },
+        }},
+    }
+    UIManager:show(self.next_chapter_dialog)
+    return true
+end
+
 function KamareImageViewer:_checkAndOfferNextChapter()
     if not self.metadata then return end
 
     if self.chapter_end_behavior == 0 then
         return
+    end
+
+    if self.page_source == "local" then
+        if self:_offerLocalNextChapter() then return end
     end
 
     local seriesId = self.metadata.seriesId or self.metadata.series_id
@@ -3232,6 +3392,24 @@ function KamareImageViewer:_postViewProgress(force)
 
     if self.last_posted_page == page_to_post and not (at_end or on_last_page) then return end
 
+    -- Journal first: a crash during the POST must not lose the position.
+    local journal = self.cache_journal
+    if journal and self.cache_identity then
+        journal:set_position(self.cache_identity, page_to_post, {
+            source = self.offline and "offline" or "online",
+            force = force and true or false,
+        })
+        if self.offline then
+            journal:session_update(self.cache_identity, page_to_post)
+        end
+    end
+
+    -- Fully offline: post nothing, only the journal moves.
+    if self.offline then
+        self.last_posted_page = page_to_post
+        return
+    end
+
     -- Cancel any pending debounced POST.
     if self._progress_post_func then
         UIManager:unschedule(self._progress_post_func)
@@ -3248,9 +3426,12 @@ function KamareImageViewer:_postViewProgress(force)
         end
         self._progress_post_inflight = false
         self._progress_post_pending = false
-        pcall(function()
-            KavitaClient:postReaderProgressForPage(self.metadata, page_to_post)
+        local ok, code = pcall(function()
+            return KavitaClient:postReaderProgressForPage(self.metadata, page_to_post)
         end)
+        if ok and (code == 200 or code == 204) and journal and self.cache_identity then
+            journal:mark_pushed(self.cache_identity.serverKey, self.cache_identity.chapterId)
+        end
     else
         -- Debounced: accumulate page changes during fast scroll, fire once
         -- 2s after the user stops. Dispatched via AsyncFetch so the HTTP
@@ -3276,6 +3457,10 @@ function KamareImageViewer:_postViewProgress(force)
                 function(_, _code)
                     self._progress_post_inflight = false
                     self._progress_post_handle = nil
+                    if _code == 200 and self.cache_journal and self.cache_identity then
+                        self.cache_journal:mark_pushed(self.cache_identity.serverKey,
+                            self.cache_identity.chapterId)
+                    end
                     if self._progress_post_pending then
                         self._progress_post_pending = false
                         -- Force re-evaluation against the latest page state.
@@ -3322,6 +3507,12 @@ function KamareImageViewer:onClose()
 
     self:syncAndSaveSettings()
     self:_postViewProgress(true) -- force immediate (sync) POST on close
+    if self.cache_journal and self.cache_identity and self.offline then
+        self.cache_journal:session_end(self.cache_identity)
+    end
+    if self.cache_journal and self.cache_identity then
+        self.cache_journal:force_flush()
+    end
     self:recordViewingTimeIfValid()
 
     if self.initial_rotation_mode and Screen:getRotationMode() ~= self.initial_rotation_mode then

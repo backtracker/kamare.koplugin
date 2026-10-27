@@ -138,28 +138,103 @@ function Kamare:addToMainMenu(menu_items)
     }
 end
 
-function Kamare:onShowKavitaBrowser()
-    NetworkMgr:runWhenConnected(function()
-        self.browser = KavitaBrowser:new{
-            ui = self.ui,
-            servers = self.servers,
-            title = _("Kavita Manga Reader"),
-            is_popout = false,
-            is_borderless = true,
-            title_bar_fm_style = true,
-            kamare_settings = self.kamare_settings,
-            -- Pass CoverBrowser modules if available
-            has_coverbrowser = self.has_coverbrowser,
-            BookInfoManager = self.BookInfoManager,
-            CoverMenu = self.CoverMenu,
-            ListMenu = self.ListMenu,
-            MosaicMenu = self.MosaicMenu,
-            close_callback = function()
-                UIManager:close(self.browser)
-            end,
-        }
+-- Lazily build the shared cache context: one store, one journal and one
+-- download queue for the whole plugin session (spec 05 A10: single writer).
+function Kamare:_getCacheContext()
+    if self._cache_context then return self._cache_context end
+    local Store = require("kamarecachestore")
+    local Journal = require("kamarejournal")
+    local Queue = require("kamarecachequeue")
+    local KavitaClient = require("kavitaclient")
 
-        UIManager:show(self.browser)
+    local store = Store:new{}
+    local journal = Journal:new{ scheduler = UIManager }
+    journal:load()
+
+    local ui = {
+        prevent_standby = function() UIManager:preventStandby() end,
+        allow_standby = function() UIManager:allowStandby() end,
+        on_state_change = function()
+            if self.browser and self.browser.onCacheStateChanged then
+                self.browser:onCacheStateChanged()
+            end
+        end,
+        on_chapter_done = function()
+            if self.browser and self.browser.onCacheChapterDone then
+                self.browser:onCacheChapterDone()
+            end
+        end,
+    }
+    local queue = Queue:new{
+        store = store,
+        settings = self.kamare_settings,
+        client = KavitaClient,
+        ui = ui,
+    }
+    queue:load()
+
+    self._cache_context = { store = store, journal = journal, queue = queue }
+    return self._cache_context
+end
+
+function Kamare:_syncJournal()
+    local ctx = self:_getCacheContext()
+    if not NetworkMgr:isOnline() then return end
+    local KavitaClient = require("kavitaclient")
+    local active = package.loaded["kamareimageviewer"]
+    local current_id
+    if active and active.active_instance and active.active_instance.metadata then
+        current_id = active.active_instance.metadata.chapterId
+            or active.active_instance.metadata.chapter_id
+    end
+    local ok, summary = pcall(ctx.journal.sync, ctx.journal, KavitaClient, {
+        force_current_chapter = current_id,
+    })
+    if ok and summary then
+        logger.info("[kamare:journal] sync pushed=", summary.pushed,
+            "superseded=", summary.superseded, "failed=", summary.failed,
+            "skipped=", summary.skipped)
+    end
+end
+
+function Kamare:_showBrowser(offline)
+    local ctx = self:_getCacheContext()
+    self.browser = KavitaBrowser:new{
+        ui = self.ui,
+        servers = self.servers,
+        title = _("Kavita Manga Reader"),
+        is_popout = false,
+        is_borderless = true,
+        title_bar_fm_style = true,
+        kamare_settings = self.kamare_settings,
+        cache = ctx,
+        offline = offline,
+        -- Pass CoverBrowser modules if available
+        has_coverbrowser = self.has_coverbrowser,
+        BookInfoManager = self.BookInfoManager,
+        CoverMenu = self.CoverMenu,
+        ListMenu = self.ListMenu,
+        MosaicMenu = self.MosaicMenu,
+        close_callback = function()
+            UIManager:close(self.browser)
+        end,
+    }
+
+    UIManager:show(self.browser)
+
+    if not offline then
+        UIManager:nextTick(function() self:_syncJournal() end)
+    end
+end
+
+function Kamare:onShowKavitaBrowser()
+    -- Offline: go straight to the cached shelf; never prompt to enable Wi-Fi.
+    if NetworkMgr:isOnline() == false then
+        self:_showBrowser(true)
+        return
+    end
+    NetworkMgr:runWhenConnected(function()
+        self:_showBrowser(false)
     end)
 end
 
@@ -187,6 +262,19 @@ function Kamare:_initializeDeviceId()
 
         self.kamare_settings:saveSetting("kamare_device_id", self.kamare_device_id)
         logger.info("Kamare: Generated new Kamare device ID:", self.kamare_device_id)
+    end
+end
+
+function Kamare:onSuspend()
+    local ctx = self._cache_context
+    if ctx then
+        pcall(ctx.journal.force_flush, ctx.journal)
+    end
+end
+
+function Kamare:onNetworkConnected()
+    if self.browser then
+        self:_syncJournal()
     end
 end
 

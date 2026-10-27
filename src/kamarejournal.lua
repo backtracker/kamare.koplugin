@@ -438,6 +438,9 @@ function Journal:sync(client, opts)
             local push = local_page > remote_page
 
             if not push and local_page < remote_page
+                and opts.force_current_chapter and opts.force_current_chapter == pos.chapterId then
+                push = true
+            elseif not push and local_page < remote_page
                 and opts.is_current and opts.is_current(pos) and opts.prompt_current then
                 local choice = opts.prompt_current(pos, remote)
                 summary.conflict = summary.conflict + 1
