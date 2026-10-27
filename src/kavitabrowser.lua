@@ -423,6 +423,12 @@ function KavitaBrowser:_normalizeSeriesChapters(detail)
             koreaderHash = hash,
             fingerprint = string.format("%s:%s:%s",
                 tostring(ch.pages), tostring(bytes), tostring(hash)),
+            archiveExt = (function()
+                local path = ch.files and ch.files[1]
+                    and (ch.files[1].filePath or ch.files[1].path)
+                local ext = path and path:match("%.([%w]+)$")
+                return ext and ext:lower() or nil
+            end)(),
             files = ch.files,
         }
     end
@@ -510,7 +516,7 @@ function KavitaBrowser:_cacheEntriesFor(chapters)
                 order = c.order,
                 pages = c.pages,
                 archiveBytes = c.bytes,
-                archiveExt = "cbz",
+                archiveExt = c.archiveExt or "cbz",
                 koreaderHash = c.koreaderHash,
                 files = c.files,
                 pagesReadSnapshot = c.pagesRead,
@@ -859,6 +865,7 @@ function KavitaBrowser:showCacheShelf(refresh_only)
         nil, self.catalog_author)
     self:setTitleBarLeftIcon("appbar.menu")
     self.onLeftButtonTap = function() self:showTitleMenu() end
+    if not refresh_only then self:_syncSilently() end
 end
 
 function KavitaBrowser:_shelfSeriesFromIndex(server_key, series_id)
@@ -1197,7 +1204,6 @@ end
 
 function KavitaBrowser:_clearAllCache()
     local store = self:_store()
-    local queue = self:_queue()
     local usage = store:total_usage()
     local keys = store:list_server_keys()
     local dialog
@@ -1345,19 +1351,12 @@ function KavitaBrowser:_cycleCacheSort()
     self:showCacheShelf(true)
 end
 
-function KavitaBrowser:_syncNow()
-    if self.offline or NetworkMgr:isOnline() == false then
-        UIManager:show(InfoMessage:new{ text = _("Offline · progress will sync after reconnecting") })
-        return
-    end
-    local active = KamareImageViewer.active_instance
-    local current_id = active and active.metadata
-        and (active.metadata.chapterId or active.metadata.chapter_id) or nil
+function KavitaBrowser:_runSync(force_current_chapter)
     local loading = InfoMessage:new{ text = _("Syncing reading progress…"), timeout = 0 }
     UIManager:show(loading)
     UIManager:forceRePaint()
     local ok, summary = pcall(self:_journal().sync, self:_journal(), KavitaClient, {
-        force_current_chapter = current_id,
+        force_current_chapter = force_current_chapter,
     })
     UIManager:close(loading)
     if not ok or not summary then
@@ -1369,6 +1368,57 @@ function KavitaBrowser:_syncNow()
             summary.pushed, summary.superseded, summary.failed, summary.skipped),
     })
     if self.view_kind == "shelf" then self:showCacheShelf(true) end
+end
+
+function KavitaBrowser:_syncNow()
+    if self.offline or NetworkMgr:isOnline() == false then
+        UIManager:show(InfoMessage:new{ text = _("Offline · progress will sync after reconnecting") })
+        return
+    end
+
+    -- Current-book exception (06 A5): only the book open right now may ask the
+    -- user whether to keep the remote position. Batch sync stays monotonic.
+    local active = KamareImageViewer.active_instance
+    local current_id = active and active.metadata
+        and (active.metadata.chapterId or active.metadata.chapter_id) or nil
+    local key = self:_serverKeyForCurrent()
+    if current_id and key then
+        local pos = self:_journal():get_position(key, current_id)
+        if pos then
+            local ok, remote = pcall(KavitaClient.getReaderProgress, KavitaClient, current_id)
+            local remote_page = ok and type(remote) == "table" and tonumber(remote.pageNum) or nil
+            local local_page = tonumber(pos.pageNum) or 0
+            if remote_page and remote_page > local_page then
+                local dialog
+                dialog = ConfirmBox:new{
+                    text = T(_("The server is ahead for the open book (%1 > %2). Keep the server position?"),
+                        remote_page, local_page),
+                    ok_text = _("Keep server"),
+                    cancel_text = _("Use this device"),
+                    ok_callback = function()
+                        UIManager:close(dialog)
+                        self:_runSync(false)
+                    end,
+                    cancel_callback = function()
+                        UIManager:close(dialog)
+                        self:_runSync(true)
+                    end,
+                }
+                UIManager:show(dialog)
+                return
+            end
+        end
+    end
+    self:_runSync(false)
+end
+
+-- Entering the cached shelf also triggers a quiet batch sync (06 A4 b).
+function KavitaBrowser:_syncSilently()
+    if self.offline or NetworkMgr:isOnline() == false then return end
+    UIManager:nextTick(function()
+        pcall(self:_journal().sync, self:_journal(), KavitaClient, {})
+        if self.view_kind == "shelf" then self:showCacheShelf(true) end
+    end)
 end
 
 function KavitaBrowser:showTitleMenu()

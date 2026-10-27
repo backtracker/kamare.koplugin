@@ -206,7 +206,11 @@ function Cache.delete(base_url, chapter_ids)
             ctx.store:delete_chapter(key, entry.seriesId, id)
             deleted = deleted + 1
         else
-            ctx.store:delete_chapter(key, nil, id)
+            local part = ctx.store:part_path(key, id)
+            local had_part = ctx.store:file_size(part) > 0
+            os.remove(part)
+            ctx.store:remove_index_chapter(key, nil, id)
+            if had_part then deleted = deleted + 1 end
         end
     end
     return true, nil, deleted

@@ -13,8 +13,7 @@ Integration branch: `feat/kavita-offline-cache`, plugin version `0.10.0`, cache 
 The runner boots the KOReader emulator LuaJIT runtime (`v2026.07.2-207`) with the real
 `rapidjson`, `libarchive` and `lfs` modules. It uses no external network; the only socket
 traffic is a loopback HTTP fixture (`spec/fixtures/range_server.py`) used by the file-sink
-tests. Last run: **291 assertions passed, 0 failed** (plus the `update_stale`/journal
-additions below; run the command for the current count).
+tests. Last run: **297 assertions passed, 0 failed**.
 
 There is no Kavita API key on this machine, so anything that requires a real server is
 listed as manual below.

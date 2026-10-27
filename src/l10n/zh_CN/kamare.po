@@ -895,3 +895,13 @@ msgid "Whole series"
 msgstr "整个系列"
 
 
+
+msgid "The server is ahead for the open book (%1 > %2). Keep the server position?"
+msgstr "服务器上本书的进度更靠后（%1 > %2）。保留服务器位置吗？"
+
+msgid "Keep server"
+msgstr "保留服务器"
+
+msgid "Use this device"
+msgstr "用本机位置"
+

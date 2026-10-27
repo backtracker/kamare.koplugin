@@ -188,15 +188,9 @@ function Kamare:_syncJournal()
     local ctx = self:_getCacheContext()
     if not NetworkMgr:isOnline() then return end
     local KavitaClient = require("kavitaclient")
-    local active = package.loaded["kamareimageviewer"]
-    local current_id
-    if active and active.active_instance and active.active_instance.metadata then
-        current_id = active.active_instance.metadata.chapterId
-            or active.active_instance.metadata.chapter_id
-    end
-    local ok, summary = pcall(ctx.journal.sync, ctx.journal, KavitaClient, {
-        force_current_chapter = current_id,
-    })
+    -- Automatic sync is strictly monotonic. The "current book is behind"
+    -- exception is handled interactively by the manual Sync action.
+    local ok, summary = pcall(ctx.journal.sync, ctx.journal, KavitaClient, {})
     if ok and summary then
         logger.info("[kamare:journal] sync pushed=", summary.pushed,
             "superseded=", summary.superseded, "failed=", summary.failed,

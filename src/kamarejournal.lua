@@ -330,6 +330,7 @@ function Journal:session_end(entry)
     if not session then return nil end
     self._open_sessions[key] = nil
     session.endTs = self.clock()
+    session.pages = math.max(0, (tonumber(session.endPage) or 0) - (tonumber(session.startPage) or 0) + 1)
     self.sessions[#self.sessions + 1] = session
     self.dirty = true
     self:_mark_dirty(false)
@@ -344,6 +345,7 @@ function Journal:touch_session(entry, start_page, end_page, opts)
     session.endTs = opts.endTs or self.clock()
     session.startPage = start_page or 1
     session.endPage = end_page or start_page or 1
+    session.pages = math.max(0, (tonumber(session.endPage) or 0) - (tonumber(session.startPage) or 0) + 1)
     self.sessions[#self.sessions + 1] = session
     self.dirty = true
     self:_mark_dirty(opts.force or false)

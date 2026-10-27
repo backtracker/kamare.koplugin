@@ -311,6 +311,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
         -- (else nil) and err carries the reason string; on a 2xx success err
         -- is nil. bytes/total_ms always carry partial-progress info.
         local stats = {
+            headers = headers,
             bytes = received,
             total_ms = total_ms,
             handshake_ms = handshake_ms,

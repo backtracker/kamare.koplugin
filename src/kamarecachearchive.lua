@@ -293,6 +293,7 @@ function Archive.extract(reader, plan, dest_dir)
     return { pages = pages, pagesBytes = pages_bytes }
 end
 
+-- Returns plan, flattened_name_by_page, err.
 function Archive.plan_for_archive(path)
     local reader, err = Archive.open(path)
     if not reader then return nil, nil, err end
@@ -405,6 +406,13 @@ function Archive.download_to_part(opts, on_done)
         if code ~= 200 and code ~= 206 then
             on_done(false, "http " .. tostring(code), stats)
             return
+        end
+        if offset > 0 and code == 206 then
+            local range = stats and stats.headers and stats.headers["content-range"]
+            if not range or not range:match("^bytes " .. offset .. "%-") then
+                on_done(false, "bad content-range", stats)
+                return
+            end
         end
         local size = opts.store and opts.store:file_size(part) or (stats and stats.bytes) or 0
         if opts.archive_bytes and size ~= opts.archive_bytes then

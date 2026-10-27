@@ -418,6 +418,7 @@ function Queue:_step()
     if not entry then
         self.state = "idle"
         self.current = nil
+        self.completed_bytes = 0
         self:_standby_off()
         self:save()
         self:_changed()
@@ -447,6 +448,13 @@ function Queue:_step()
     local ok, err = self:_hydrate(entry)
     if not ok then
         self:_fail_entry(entry, err)
+        return
+    end
+
+    free = self.store:free_bytes()
+    need = (entry.archiveBytes or 0) * self.PEAK_FACTOR
+    if free and (free < self.LOW_WATER_BYTES or free < need) then
+        self:pause("low_space")
         return
     end
 
@@ -564,6 +572,7 @@ function Queue:_extract_archive(entry)
         return
     end
 
+    if self.current ~= entry then return end
     local exts = {}
     for _, item in ipairs(result.plan or {}) do
         exts[item.page] = archive.page_extension(item.path)
@@ -660,6 +669,7 @@ function Queue:_download_pages(entry, why)
 end
 
 function Queue:_write_chapter(entry, data)
+    if self.current ~= entry then return end
     local ext_map = {}
     for page, ext in pairs(data.pageExts or {}) do ext_map[page] = ext end
 
