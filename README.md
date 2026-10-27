@@ -72,6 +72,30 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
 2. Go to **Settings** → **Account** → **API Key**
 3. Generate a new key if needed and type it to the setup dialog
 
+## Offline cache
+
+Kamare can download whole Kavita chapters (one cbz per chapter), read them
+without a network connection, and push the reading position back to Kavita on
+reconnect. The cache lives under `kamare/cache/<serverKey>/` in the KOReader
+data directory; reading progress stays in `settings/kamare-journal.json` and is
+never deleted together with cached pages.
+
+- Cache entries: long-press a chapter/volume in the series page, or use the
+  top-left menu for whole-series downloads.
+- Manage storage: top-left menu → **Cached chapters** (usage, sorting, delete
+  read chapters, update outdated chapters, clear cache, optional size limit).
+- Offline: opening the plugin without a connection goes straight to the cached
+  shelf. Uncached chapters are shown but disabled.
+- Reconnect: pending positions are pushed once (monotonic rule: a position is
+  only pushed when it is ahead of the server's). Offline reading time stays
+  local; Kavita sessions still get one normal 1-page activity per push, so
+  Kavita's offline page counts stay low by design.
+
+Releases inject the plugin version into `kamareversion.lua`; checkouts report
+`0.10.0-dev`. The cache module (`kamarecache`) is versioned independently:
+`API_VERSION = 1` with a `capabilities` table, so other plugins can probe it
+with `pcall(require, "kamarecache")` and degrade silently when it is absent.
+
 ## Configuration
 
 Access settings while reading by tapping the screen. Customize your experience:

@@ -569,3 +569,329 @@ msgstr "黑色"
 msgctxt "Background color"
 msgid "White"
 msgstr "白色"
+
+msgid "%1 chapter(s) have progress waiting to sync; deleting the cache does not stop that sync."
+msgstr "%1 章有进度待同步；删除缓存不会中断同步。"
+
+msgid "%1 chapter(s) need updating"
+msgstr "%1 章需要更新"
+
+msgid "%1 chapters · %2"
+msgstr "%1 章 · %2"
+
+msgid "%1 h %2 min"
+msgstr "%1 小时 %2 分"
+
+msgid "%1 min"
+msgstr "%1 分钟"
+
+msgid "%1 pending sync"
+msgstr "%1 条待同步"
+
+msgid "%1 unfinished download(s) · tap to continue"
+msgstr "%1 个未完成下载 · 点击继续"
+
+msgid "%1/%2 cached"
+msgstr "已缓存 %1/%2"
+
+msgid "%1/%2 chapters cached"
+msgstr "已缓存 %1/%2 章"
+
+msgid "All cache cleared, freed %1"
+msgstr "已清空全部缓存，释放 %1"
+
+msgid "Already cached or queued"
+msgstr "已缓存或已在队列中"
+
+msgid "Cache %1 chapter(s), about %2 (%3 available)?"
+msgstr "缓存 %1 章，约 %2（可用 %3）？"
+
+msgid "Cache cleared, freed %1"
+msgstr "缓存已清空，释放 %1"
+
+msgid "Cache entire series…"
+msgstr "缓存整个系列…"
+
+msgid "Cache limit disabled"
+msgstr "缓存上限已关闭"
+
+msgid "Cache limit reached: %s of %s used"
+msgstr "已达缓存上限：已用 %s / %s"
+
+msgid "Cache limit set to %1 MB"
+msgstr "缓存上限已设为 %1 MB"
+
+msgid "Cache next N volumes"
+msgstr "缓存往后 N 卷"
+
+msgid "Cache series"
+msgstr "缓存系列"
+
+msgid "Cache size limit (MB, 0 = no limit)"
+msgstr "缓存上限（MB，0 = 不限制）"
+
+msgid "Cache size limit…"
+msgstr "缓存上限…"
+
+msgid "Cached"
+msgstr "已缓存"
+
+msgid "Cached chapters"
+msgstr "已缓存章节"
+
+msgid "Cached metadata is incomplete · reconnect to refresh this chapter"
+msgstr "缓存元数据不完整 · 联网后请刷新本章缓存"
+
+msgid "Check for cache updates"
+msgstr "检查缓存更新"
+
+msgid "Checking for updates…"
+msgstr "正在检查更新…"
+
+msgid "Clear"
+msgstr "清空"
+
+msgid "Clear all"
+msgstr "全部清空"
+
+msgid "Clear all cache (including unlinked)"
+msgstr "清空全部缓存（含未关联）"
+
+msgid "Clear all cache for this server? %1 chapters · about %2. Reading progress records are kept."
+msgstr "清空本服务器的全部缓存？%1 章 · 约 %2。阅读进度记录会保留。"
+
+msgid "Clear all cache, including unlinked servers? %1 chapters · about %2. Reading progress records are kept."
+msgstr "清空全部缓存（含未关联服务器）？%1 章 · 约 %2。阅读进度记录会保留。"
+
+msgid "Clear this server cache"
+msgstr "清空本服务器缓存"
+
+msgid "Close the book before deleting its cache"
+msgstr "请先关闭本书再删除缓存"
+
+msgid "Connect to browse the server"
+msgstr "联网后才能浏览服务器"
+
+msgid "Connect to check for cache updates"
+msgstr "联网后才能检查缓存更新"
+
+msgid "Delete %1 chapter(s), freeing about %2?"
+msgstr "删除 %1 章，释放约 %2？"
+
+msgid "Delete all cached chapters in this series"
+msgstr "删除本系列全部缓存章节"
+
+msgid "Delete all cached chapters of this series? About %1 will be freed. Progress records are kept."
+msgstr "删除本系列全部缓存章节？将释放约 %1。阅读进度记录会保留。"
+
+msgid "Delete cached chapter"
+msgstr "删除本章缓存"
+
+msgid "Delete cached chapter (close the book first)"
+msgstr "删除本章缓存（请先关闭本书）"
+
+msgid "Delete read chapters"
+msgstr "删除已读章节"
+
+msgid "Delete read chapters (this server)"
+msgstr "删除已读章节（本服务器）"
+
+msgid "Delete read chapters in this series"
+msgstr "删除本系列的已读章节"
+
+msgid "Delete series cache"
+msgstr "删除本系列缓存"
+
+msgid "Delete volume cache"
+msgstr "删除本卷缓存"
+
+msgid "Deleted %1 chapter(s), freed %2"
+msgstr "已删除 %1 章，释放 %2"
+
+msgid "Deleted this series cache, freed %1"
+msgstr "已删除本系列缓存，释放 %1"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Download cancelled"
+msgstr "已取消下载"
+
+msgid "Download chapter"
+msgstr "缓存本章"
+
+msgid "Download failed · retry"
+msgstr "缓存失败 · 重试"
+
+msgid "Download over Wi-Fi only: off"
+msgstr "仅在 Wi-Fi 下下载：关"
+
+msgid "Download over Wi-Fi only: on"
+msgstr "仅在 Wi-Fi 下下载：开"
+
+msgid "Download queue resumed"
+msgstr "下载队列已继续"
+
+msgid "Download volume"
+msgstr "缓存本卷"
+
+msgid "Downloading %1 / %2 · %3/%4"
+msgstr "下载中 %1 / %2 · 第 %3/%4 个"
+
+msgid "Downloads allowed on any connection"
+msgstr "允许在任何网络下下载"
+
+msgid "Downloads limited to Wi-Fi (best effort)"
+msgstr "仅在 Wi-Fi 下下载（尽力而为）"
+
+msgid "Downloads paused"
+msgstr "下载已暂停"
+
+msgid "Everything selected is already cached"
+msgstr "所选章节均已缓存"
+
+msgid "Extracting"
+msgstr "解包中"
+
+msgid "From current progress"
+msgstr "从当前进度到结尾"
+
+msgid "Go browse"
+msgstr "去浏览"
+
+msgid "Needs update"
+msgstr "需更新"
+
+msgid "Next N volumes…"
+msgstr "往后 N 卷…"
+
+msgid "No cache for this server"
+msgstr "本服务器没有缓存"
+
+msgid "No cached chapters · cache some to read offline"
+msgstr "暂无缓存 · 缓存后可在断网时阅读"
+
+msgid "No chapters available"
+msgstr "没有可缓存的章节"
+
+msgid "No outdated chapters"
+msgstr "没有需要更新的章节"
+
+msgid "No server selected"
+msgstr "未选择服务器"
+
+msgid "Not cached"
+msgstr "未缓存"
+
+msgid "Not cached · connect to continue"
+msgstr "未缓存 · 联网后可继续"
+
+msgid "Not cached · connect to download"
+msgstr "未缓存 · 联网后可下载"
+
+msgid "Not enough free space to download"
+msgstr "可用空间不足，无法下载"
+
+msgid "Not enough space: need %.0f MB, %.0f MB available"
+msgstr "空间不足：需要 %.0f MB，可用 %.0f MB"
+
+msgid "Not enough space: need about %1, %2 available"
+msgstr "空间不足：需要约 %1，可用 %2"
+
+msgid "Nothing to delete"
+msgstr "没有可删除的内容"
+
+msgid "Nothing to download"
+msgstr "没有可下载的内容"
+
+msgid "Number of volumes"
+msgstr "卷数"
+
+msgid "OK"
+msgstr "确定"
+
+msgid "Offline reading %1 (not counted by Kavita)"
+msgstr "离线阅读 %1（未计入 Kavita 统计）"
+
+msgid "Offline · progress will sync after reconnecting"
+msgstr "离线 · 恢复联网后会同步进度"
+
+msgid "Offline: showing cached series only"
+msgstr "离线：仅显示已缓存的系列"
+
+msgid "Open"
+msgstr "打开"
+
+msgid "Pause downloads"
+msgstr "暂停下载"
+
+msgid "Paused"
+msgstr "已暂停"
+
+msgid "Queued"
+msgstr "排队中"
+
+msgid "Queued %1 chapter(s)"
+msgstr "已加入队列 %1 章"
+
+msgid "Queued %1 chapter(s) for update"
+msgstr "已加入更新队列 %1 章"
+
+msgid "Read · cached"
+msgstr "已读 · 已缓存"
+
+msgid "Reading progress records are kept."
+msgstr "阅读进度记录会保留。"
+
+msgid "Reading · cached"
+msgstr "在读 · 已缓存"
+
+msgid "Resume downloads"
+msgstr "继续下载"
+
+msgid "Series %1"
+msgstr "系列 %1"
+
+msgid "Sort cached series: "
+msgstr "排序已缓存系列："
+
+msgid "Sync failed"
+msgstr "同步失败"
+
+msgid "Sync progress now"
+msgstr "立即同步进度"
+
+msgid "Synced: %1 pushed, %2 superseded, %3 failed, %4 skipped"
+msgstr "同步完成：推送 %1 条，云端更新 %2 条，失败 %3 条，跳过 %4 条"
+
+msgid "Syncing reading progress…"
+msgstr "正在同步阅读进度…"
+
+msgid "The chapter currently open will be skipped."
+msgstr "当前正在阅读的章节将跳过。"
+
+msgid "Unlinked server %1"
+msgstr "未关联服务器 %1"
+
+msgid "Unlinked servers (%1)"
+msgstr "未关联服务器（%1）"
+
+msgid "Update"
+msgstr "更新"
+
+msgid "Update %1 outdated chapter(s)? They cannot be read offline while updating."
+msgstr "更新 %1 章过期缓存？更新期间这些章节无法离线阅读。"
+
+msgid "Update cache"
+msgstr "更新缓存"
+
+msgid "Update outdated chapters"
+msgstr "更新过期章节"
+
+msgid "Used %1 · %2 free"
+msgstr "已用 %1 · 可用 %2"
+
+msgid "Whole series"
+msgstr "整个系列"
+
+

@@ -26,6 +26,18 @@ jobs:
             sudo apt-get update && sudo apt-get install -y zip
           fi
 
+      - name: Inject plugin version
+        run: |
+          set -e
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ]; then
+            echo "Cannot derive a version from release tag '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          sed -i "s/@VERSION@/${version}/g" src/kamareversion.lua
+          grep -q "${version}" src/kamareversion.lua
+          echo "Injected plugin version: $version"
+
       - name: Prepare package directory
         run: |
           set -e

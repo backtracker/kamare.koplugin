@@ -174,6 +174,13 @@ function Kamare:_getCacheContext()
     queue:load()
 
     self._cache_context = { store = store, journal = journal, queue = queue }
+
+    -- Publish the very same instances through the public facade so external
+    -- callers share one queue and one writer (spec 05 A10 / 09 A2).
+    local Cache = require("kamarecache")
+    Cache.set_context(self._cache_context)
+    self.cache_api = Cache
+
     return self._cache_context
 end
 
