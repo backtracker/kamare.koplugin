@@ -41,20 +41,29 @@ end
 function Utils.buildVolumeTitle(dto)
     local vol_prefix = dto.number and T(_("Volume %1"), tostring(dto.number)) or nil
     if Utils.firstNonEmpty(dto.name) then
-        local lower = dto.name:lower()
-        local is_just_number = tonumber(dto.name) ~= nil and dto.name:match("^%d+$")
-        if not (hasWord(lower, "vol") or hasWord(lower, "volume") or is_just_number) and vol_prefix then
-            return vol_prefix .. ": " .. dto.name
-        elseif is_just_number and vol_prefix then
-            return vol_prefix
-        end
-        return dto.name
+        local name = dto.name
+        local lower = name:lower()
+        local is_just_number = tonumber(name) ~= nil and name:match("^%d+$")
+        -- Lua patterns are byte based: compare the 3-byte CJK suffix instead
+        -- of putting it in a character class.
+        local is_volume_number = name:match("^%d+%s*") ~= nil
+            and (name:sub(-3) == "卷" or name:sub(-3) == "巻")
+        local names_volume = hasWord(lower, "vol") or hasWord(lower, "volume")
+            or name:find("卷", 1, true) ~= nil
+        if (is_just_number or is_volume_number) and vol_prefix then return vol_prefix end
+        if names_volume then return name end
+        if vol_prefix then return vol_prefix .. ": " .. name end
+        return name
     end
     return vol_prefix or T(_("Volume #%1"), tostring(dto.id or "?"))
 end
 
 function Utils.buildChapterTitle(dto)
-    local ch_prefix = dto.number and T(_("Ch. %1"), tostring(dto.number)) or nil
+    -- Kavita uses negative sentinel numbers (-100000) for loose/special
+    -- chapters; prefixing those produces "Ch. -100000: ..." on every row.
+    local number = tonumber(dto.number)
+    local ch_prefix = (number and number >= 0)
+        and T(_("Ch. %1"), tostring(dto.number)) or nil
     if dto.isSpecial then
         return Utils.firstNonEmpty(dto.titleName, dto.title, dto.range, T(_("Special #%1"), tostring(dto.id or "?")))
     end

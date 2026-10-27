@@ -22,6 +22,44 @@ function Util.format_duration(seconds, template)
     return string.format("%d min", m)
 end
 
+local function natural_tokens(value)
+    local tokens, s = {}, tostring(value):lower()
+    local i = 1
+    while i <= #s do
+        local j = s:find("%d", i)
+        if not j then
+            tokens[#tokens + 1] = { str = s:sub(i) }
+            break
+        end
+        if j > i then tokens[#tokens + 1] = { str = s:sub(i, j - 1) } end
+        local k = s:find("%D", j) or (#s + 1)
+        tokens[#tokens + 1] = { num = tonumber(s:sub(j, k - 1)) }
+        i = k
+    end
+    return tokens
+end
+
+--- Natural, case-insensitive order ("CLAYMORE (2)" before "CLAYMORE (10)").
+function Util.natural_compare(a, b)
+    a, b = tostring(a), tostring(b)
+    local ta, tb = natural_tokens(a), natural_tokens(b)
+    for i = 1, math.max(#ta, #tb) do
+        local x, y = ta[i], tb[i]
+        if not x then return true end
+        if not y then return false end
+        if x.num ~= nil and y.num ~= nil then
+            if x.num ~= y.num then return x.num < y.num end
+        elseif x.num ~= nil then
+            return true
+        elseif y.num ~= nil then
+            return false
+        elseif x.str ~= y.str then
+            return x.str < y.str
+        end
+    end
+    return a < b
+end
+
 function Util.append_status(subtitle, status)
     if not status or status == "" then return subtitle end
     if subtitle and subtitle ~= "" then return subtitle .. " · " .. status end

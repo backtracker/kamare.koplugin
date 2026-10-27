@@ -189,9 +189,11 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
         end
         self._updateItemsBuildUI = self.ListMenu._updateItemsBuildUI
 
-        -- Set ListMenu behavior flags
+        -- Set ListMenu behavior flags. Kavita/cache paths are virtual, so
+        -- CoverBrowser's "filenames only" mode would show 10634.kamare /
+        -- 17878.kamare instead of titles.
         self._do_cover_images = display_mode ~= "list_only_meta"
-        self._do_filename_only = display_mode == "list_image_filename"
+        self._do_filename_only = false
     else
         logger.error("Kamare: Unknown display_mode_type - neither mosaic nor list!")
         logger.error("Kamare: This will cause crashes - _recalculateDimen not set")
@@ -207,8 +209,9 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
         -- Start with BookInfoManager data (static metadata like title, authors, pages)
         local bookinfo = self.BookInfoManager:getBookInfo(filepath)
 
-        -- For Kavita virtual paths, enhance with live progress from item_table
-        if filepath and filepath:match("^/kavita/") then
+        -- For virtual paths (server items and local cache), enhance with live
+        -- progress and, for cache rows, the real title instead of the ID.
+        if filepath and (filepath:match("^/kavita/") or filepath:match("^/kamare/")) then
             -- Find the matching item in item_table
             local kavita_item = nil
             if self.item_table then
@@ -255,6 +258,11 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
 
             -- Build the complete book_info structure
             local result = bookinfo or {}
+            if kavita_item then
+                result.title = result.title or kavita_item.text
+                result.authors = result.authors or kavita_item.author
+                result.ignore_meta = false
+            end
             result.been_opened = (pagesRead and pagesRead > 0) or false
             result.pages = pages  -- Use calculated pages (DTO or BookInfoManager)
             result.percent_finished = percent_finished
@@ -453,9 +461,21 @@ end
 -- Normalize SeriesDetailDto into the flat chapter list stored in series.json.
 function KavitaBrowser:_normalizeSeriesChapters(detail)
     local out, seen = {}, {}
-    local function add(ch)
+    local function usable_order(n)
+        n = tonumber(n)
+        if not n or n <= 0 then return nil end
+        return n
+    end
+    local function add(ch, vol)
         if type(ch) ~= "table" or not ch.id or seen[ch.id] then return end
         seen[ch.id] = true
+        local order = usable_order(ch.order) or usable_order(ch.sortOrder)
+        if not order then
+            -- Kavita imports loose/volume chapters with a -100000 sentinel;
+            -- fall back to the volume number so the list has a stable order.
+            local vol_number = tonumber(vol and vol.number)
+            order = vol_number and (vol_number * 1000 + #out + 1) or (#out + 1)
+        end
         local bytes = 0
         local hash
         if type(ch.files) == "table" then
@@ -466,7 +486,7 @@ function KavitaBrowser:_normalizeSeriesChapters(detail)
             id = ch.id,
             volumeId = ch.volumeId,
             number = ch.number,
-            order = ch.order or ch.sortOrder or (#out + 1),
+            order = order,
             title = Utils.buildChapterTitle(ch),
             pages = ch.pages,
             bytes = bytes,
@@ -484,7 +504,7 @@ function KavitaBrowser:_normalizeSeriesChapters(detail)
         }
     end
     for __, vol in ipairs(detail.volumes or {}) do
-        for __, ch in ipairs(vol.chapters or {}) do add(ch) end
+        for __, ch in ipairs(vol.chapters or {}) do add(ch, vol) end
     end
     for __, ch in ipairs(detail.chapters or {}) do add(ch) end
     for __, ch in ipairs(detail.specials or {}) do add(ch) end
@@ -1002,20 +1022,35 @@ function KavitaBrowser:_shelfSeriesFromIndex(server_key, series_id)
     return fallback
 end
 
+-- Old series.json files stored "Ch. -100000: CLAYMORE (17)" / "第 -100000 章:
+-- CLAYMORE (17)" because Kavita's sentinel number was used as a prefix. Strip
+-- such negative-number prefixes when displaying cached data.
+local function clean_cached_title(title)
+    if type(title) ~= "string" then return title end
+    local prefix, rest = title:match("^(.-:%s*)(.+)$")
+    if prefix and prefix:find("%-%d") then return rest end
+    return title
+end
+
 function KavitaBrowser:showOfflineSeries(item)
     local key = item._cache_server_key
     local sid = item._cache_series_id
     local series = self:_shelfSeriesFromIndex(key, sid)
     local chapters = series.chapters or {}
-    table.sort(chapters, function(a, b) return (tonumber(a.order) or 0) < (tonumber(b.order) or 0) end)
+    table.sort(chapters, function(a, b)
+        local ao, bo = tonumber(a.order) or 0, tonumber(b.order) or 0
+        if ao ~= bo then return ao < bo end
+        return CacheUtil.natural_compare(a.title or "", b.title or "")
+    end)
 
     self.view_kind = "offline_series"
     self.current_series_detail = nil
     self.current_server_key = key
     self.current_series_id = sid
     self.current_series_library_id = series.libraryId or item._cache_library_id
-    self.current_series_names = { name = series.seriesName or item.text }
-    self.catalog_title = series.seriesName or item.text
+    local series_title = item.text or series.seriesName or _("Series")
+    self.current_series_names = { name = series_title }
+    self.catalog_title = series_title
 
     local items, cached_count = {}, 0
     local cache = self:_cacheStatusContext(key)
@@ -1023,8 +1058,9 @@ function KavitaBrowser:showOfflineSeries(item)
         local cached = cache.by_id[c.id] ~= nil
         local status = self:_chapterStatus(key, sid, c, cache)
         if cached then cached_count = cached_count + 1 end
+        local title = clean_cached_title(c.title) or tostring(c.number or c.id)
         items[#items + 1] = {
-            text = c.title or tostring(c.number or c.id),
+            text = title,
             author = cached and status or _("Not cached"),
             cache_offline_chapter = true,
             _cache_server_key = key,
@@ -1032,7 +1068,7 @@ function KavitaBrowser:showOfflineSeries(item)
             _chapter_id = c.id,
             chapter = {
                 id = c.id, pages = c.pages, volumeId = c.volumeId,
-                number = c.number, titleName = c.title, order = c.order,
+                number = c.number, titleName = title, order = c.order,
                 pagesRead = 0,
             },
             select_enabled = cached or false,
@@ -1658,7 +1694,7 @@ function KavitaBrowser:showTitleMenu()
 
     if not self.offline then
         table.insert(buttons, {{
-            text = _("Cached chapters"),
+            text = _("Cached"),
             callback = function()
                 UIManager:close(dialog)
                 self:showCacheShelf()
@@ -2083,6 +2119,7 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
 
     -- Cache integration: fingerprint staleness, series.json, row statuses.
     self.view_kind = "series"
+    self.catalog_title = series_name or _("Series")
     self.current_series_detail = detail
     self._series_chapters_cache = nil
     local cache_key = self:_serverKeyForCurrent()
@@ -2091,7 +2128,6 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
         self:_decorateSeriesItems(items, cache_key, series_id)
     end
 
-    self.catalog_title = series_name or _("Series")
     self.search_url = nil
 
     local subtitle
@@ -2109,7 +2145,7 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
     end
     self.catalog_author = subtitle
     -- Keep series naming/author for the reader overlay
-    self.current_series_names = self.current_series_names or { name = self.catalog_title }
+    self.current_series_names = { name = self.catalog_title }
     if not self.current_series_names.author and subtitle then
         self.current_series_names.author = subtitle
     end
