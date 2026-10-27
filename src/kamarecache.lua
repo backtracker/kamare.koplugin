@@ -152,6 +152,21 @@ local function find_key(ctx, base_url)
     return key
 end
 
+-- Shared prologue for every capability that takes a base_url: build the
+-- identity tier, resolve the server key read-only, and report the stable
+-- codes. Returns the identity context + key, or nil, nil, code, message.
+-- Callers that need a deeper tier call ensure_read/ensure_queue afterwards, so
+-- an unknown server never drags in a journal or a queue.
+local function server_context(base_url)
+    if not base_url or base_url == "" then
+        return nil, nil, "base_url_required", _("Server URL required")
+    end
+    local ctx = ensure_identity()
+    local key = find_key(ctx, base_url)
+    if not key then return nil, nil, "unknown_server", _("Unknown server") end
+    return ctx, key
+end
+
 local function servers_of(settings)
     local servers = settings:readSetting("servers", {})
     if type(servers) ~= "table" then servers = {} end
@@ -310,12 +325,9 @@ end
 -- snapshot; neither present means nil (no recorded position, spec 01 A3).
 -- Never lazily creates a server key and never writes the journal.
 function Cache.resume_page(base_url, chapter_id, series_id)
-    if not base_url or base_url == "" then return nil, "base_url_required" end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     if not chapter_id then return nil end
-
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
     ctx = ensure_read()
 
     local id = tonumber(chapter_id) or chapter_id
@@ -420,9 +432,8 @@ end
 -- while entries / bytes / current / last_error are filtered to this server
 -- (spec 01 A3 / 07 A4).
 function Cache.queue_state(base_url)
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     ctx = ensure_queue()
     local queue = ctx.queue
 
@@ -468,9 +479,8 @@ end
 
 -- Write: pauses the single shared queue (affects every server, documented).
 function Cache.queue_pause(base_url)
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
+    local ctx, __, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     ctx = ensure_queue()
     local queue = ctx.queue
     if #(queue.entries or {}) == 0 then
@@ -484,9 +494,8 @@ end
 
 -- Write: resumes the shared queue. An empty queue is a no-op.
 function Cache.queue_resume(base_url)
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
+    local ctx, __, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     ctx = ensure_queue()
     ctx.queue:resume()
     return true
@@ -495,15 +504,11 @@ end
 -- Write: revives only this server's queued/failed entries, then restarts the
 -- queue. `Queue:retry` resets the consecutive-failure counter.
 function Cache.queue_retry(base_url, chapter_ids)
-    if not base_url or base_url == "" then
-        return nil, "base_url_required", _("Server URL required")
-    end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     if type(chapter_ids) ~= "table" then
         return nil, "chapter_ids_required", _("Chapter ids required")
     end
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
     ctx = ensure_queue()
     local queue = ctx.queue
 
@@ -536,9 +541,8 @@ end
 -- Read-only shelf projection of index.json (no per-chapter scan). An unknown
 -- server returns nil so the caller renders "no cache" instead of an error.
 function Cache.index(base_url)
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     ctx = ensure_read()
 
     local series = {}
@@ -598,20 +602,14 @@ end
 -- Read-only capacity estimate. Reuses the queue's hydration and space rules;
 -- writes nothing, enqueues nothing, creates no server key (spec 01 A8 / 07 A6).
 function Cache.estimate(base_url, entries)
-    if not base_url or base_url == "" then
-        return nil, "base_url_required", _("Server URL required")
-    end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     if type(entries) ~= "table" then
         return nil, "entries_required", _("Nothing to estimate")
     end
-    local ctx = ensure_identity()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
     ctx = ensure_queue()
     local queue = ctx.queue
-    local Queue = require("kamarecachequeue")
-    local factor = tonumber(queue.PEAK_FACTOR) or Queue.PEAK_FACTOR
-    local low_water = tonumber(queue.LOW_WATER_BYTES) or Queue.LOW_WATER_BYTES
+    local factor = tonumber(queue.PEAK_FACTOR) or require("kamarecachequeue").PEAK_FACTOR
 
     local chapters, bytes = 0, 0
     for __, raw in ipairs(entries or {}) do
@@ -689,15 +687,12 @@ end
 
 -- Write: deletes cached chapters (files + part + queue entry). Never the journal.
 function Cache.delete(base_url, chapter_ids)
-    if not base_url or base_url == "" then
-        return nil, "base_url_required", _("Server URL required")
-    end
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
     if type(chapter_ids) ~= "table" then
         return nil, "chapter_ids_required", _("Chapter ids required")
     end
-    local ctx = ensure_queue()
-    local key = find_key(ctx, base_url)
-    if not key then return nil, "unknown_server", _("Unknown server") end
+    ctx = ensure_queue()
 
     -- All-or-nothing delete protection: if any requested chapter is on screen,
     -- nothing is removed and no queue entry is aborted (spec 07 A1).
