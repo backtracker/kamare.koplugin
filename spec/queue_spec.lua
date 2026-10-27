@@ -185,6 +185,16 @@ return function(t)
         t.eq(#q.entries, 0, "nothing queued after rejection")
     end
 
+    -- optional absolute cache limit rejects before enqueueing
+    do
+        local q = make(t, { settings = { cache_limit_mb = 1 } })
+        q.store.total_usage = function() return { used = 1024 * 1024, chapters = 1 } end
+        local ok, err = q:enqueue({ entry() })
+        t.is_nil(ok, "cache limit blocks enqueue")
+        t.ok(err and err:find("limit", 1, true) ~= nil, "limit error message")
+        t.eq(#q.entries, 0, "nothing queued over limit")
+    end
+
     -- enqueue confirmation can cancel
     do
         local q = make(t)

@@ -744,12 +744,14 @@ function KavitaBrowser:buildCacheShelfItems()
                         libraryId = e.libraryId,
                         chapters = 0,
                         bytes = 0,
+                        lastCached = 0,
                     }
                     order[#order + 1] = sid
                 end
                 local g = grouped[sid]
                 g.chapters = g.chapters + 1
                 g.bytes = g.bytes + (tonumber(e.pagesBytes) or 0)
+                g.lastCached = math.max(g.lastCached or 0, tonumber(e.cachedAt) or 0)
             end
         end
         for _, sid in ipairs(order) do
@@ -763,6 +765,8 @@ function KavitaBrowser:buildCacheShelfItems()
                 _cache_series_id = sid,
                 _cache_library_id = g.libraryId,
                 _cache_orphan = srv.orphan,
+                _sort_bytes = g.bytes,
+                _sort_time = g.lastCached,
                 is_file = true,
                 file = string.format("/kamare/cache/%s/series/%s.kamare", srv.key, tostring(sid)),
             }
@@ -771,8 +775,18 @@ function KavitaBrowser:buildCacheShelfItems()
         end
     end
 
-    table.sort(items, function(a, b) return (a.text or "") < (b.text or "") end)
-    table.sort(orphan_items, function(a, b) return (a.text or "") < (b.text or "") end)
+    local sort_mode = self:_cacheSortMode()
+    local function sort_series(list)
+        if sort_mode == "usage" then
+            table.sort(list, function(a, b) return (a._sort_bytes or 0) > (b._sort_bytes or 0) end)
+        elseif sort_mode == "recent" then
+            table.sort(list, function(a, b) return (a._sort_time or 0) > (b._sort_time or 0) end)
+        else
+            table.sort(list, function(a, b) return (a.text or "") < (b.text or "") end)
+        end
+    end
+    sort_series(items)
+    sort_series(orphan_items)
     if #orphan_items > 0 then
         items[#items + 1] = {
             text = T(_("Unlinked servers (%1)"), #orphan_items),
@@ -810,6 +824,14 @@ end
 function KavitaBrowser:showCacheShelf(refresh_only)
     self.view_kind = "shelf"
     self.current_series_detail = nil
+    if not self.current_server_key and self.kamare_settings then
+        for _, s in ipairs(self.servers or {}) do
+            local key = s.key or self:_store():resolve_server_key(self.kamare_settings, {
+                base_url = s.kavita_url or s.url, name = s.name,
+            })
+            if key then self.current_server_key = key break end
+        end
+    end
     self.offline_shelf = self.offline
     self.catalog_title = _("Cached")
     self.catalog_author = self:_shelfSubtitle()
@@ -954,6 +976,369 @@ function KavitaBrowser:onCacheChapterDone()
     end
 end
 
+
+-- ---- cache deletion / invalidation ---------------------------------------
+
+function KavitaBrowser:_activeChapterId()
+    local active = KamareImageViewer.active_instance
+    if not active or not active.metadata then return nil end
+    return active.metadata.chapterId or active.metadata.chapter_id
+end
+
+function KavitaBrowser:_isChapterOpen(server_key, chapter_id)
+    local active_id = self:_activeChapterId()
+    if not active_id or active_id ~= chapter_id then return false end
+    local active = KamareImageViewer.active_instance
+    if active and active.cache_server_key and server_key
+        and active.cache_server_key ~= server_key then
+        return false
+    end
+    return true
+end
+
+function KavitaBrowser:_chaptersFromIndex(server_key, series_id)
+    local out = {}
+    for _, e in ipairs(self:_store():load_index_or_rebuild(server_key)) do
+        if series_id == nil or e.seriesId == series_id then
+            out[#out + 1] = {
+                serverKey = server_key, seriesId = e.seriesId, chapterId = e.chapterId,
+                pages = e.pages, bytes = e.pagesBytes or e.archiveBytes,
+                title = e.chapterTitle, pagesRead = nil,
+            }
+        end
+    end
+    return out
+end
+
+function KavitaBrowser:_isChapterRead(server_key, series_id, chapter)
+    local store = self:_store()
+    local meta = store:read_meta(server_key, series_id, chapter.chapterId or chapter.id)
+    if not meta then return false end
+    local pos = self:_journal():get_position(server_key, meta.chapterId)
+    if pos and pos.pageNum and meta.pages and pos.pageNum >= meta.pages then return true end
+    local server_read = tonumber(chapter.pagesRead)
+    if server_read and meta.pages and server_read >= meta.pages then return true end
+    local snapshot = tonumber(meta.pagesReadSnapshot)
+    if snapshot and meta.pages and snapshot >= meta.pages then return true end
+    return false
+end
+
+function KavitaBrowser:_deleteChapters(list, opts)
+    opts = opts or {}
+    local store = self:_store()
+    local queue = self:_queue()
+    local filtered = {}
+    local open_skipped = false
+    for _, c in ipairs(list or {}) do
+        if self:_isChapterOpen(c.serverKey, c.chapterId) then
+            open_skipped = true
+        else
+            filtered[#filtered + 1] = c
+        end
+    end
+    if #filtered == 0 then
+        UIManager:show(InfoMessage:new{
+            text = open_skipped and _("Close the book before deleting its cache")
+                or _("Nothing to delete"),
+        })
+        return
+    end
+
+    local total, pending = 0, 0
+    for _, c in ipairs(filtered) do
+        local meta = store:read_meta(c.serverKey, c.seriesId, c.chapterId)
+        total = total + ((meta and meta.pagesBytes) or tonumber(c.bytes) or 0)
+        local pos = self:_journal():get_position(c.serverKey, c.chapterId)
+        if pos and (pos.status == "pending" or pos.status == "failed") then
+            pending = pending + 1
+        end
+    end
+
+    local text = T(_("Delete %1 chapter(s), freeing about %2?"), #filtered, format_bytes(total))
+    if pending > 0 then
+        text = text .. "\n\n" .. T(_("%1 chapter(s) have progress waiting to sync; deleting the cache does not stop that sync."), pending)
+    end
+    text = text .. "\n\n" .. _("Reading progress records are kept.")
+    if open_skipped then
+        text = text .. "\n" .. _("The chapter currently open will be skipped.")
+    end
+
+    local dialog
+    dialog = ConfirmBox:new{
+        text = text,
+        ok_text = _("Delete"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            for _, c in ipairs(filtered) do
+                if queue:contains(c.serverKey, c.chapterId) then
+                    queue:abort(c.serverKey, c.chapterId)
+                end
+                store:delete_chapter(c.serverKey, c.seriesId, c.chapterId)
+            end
+            UIManager:show(InfoMessage:new{
+                text = T(_("Deleted %1 chapter(s), freed %2"), #filtered, format_bytes(total)),
+            })
+            if opts.after then opts.after() end
+            self:onCacheStateChanged()
+            self:refreshCurrentView()
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_deleteReadInSeries()
+    local key = self:_serverKeyForCurrent()
+    local sid = self.current_series_id
+    if not key or not sid then return end
+    local read = {}
+    for _, c in ipairs(self._series_chapters_cache or {}) do
+        local meta = self:_store():read_meta(key, sid, c.id)
+        if meta and self:_isChapterRead(key, sid, {
+            chapterId = c.id, pagesRead = c.pagesRead,
+        }) then
+            read[#read + 1] = {
+                serverKey = key, seriesId = sid, chapterId = c.id,
+                pages = c.pages, bytes = meta.pagesBytes, title = c.title,
+            }
+        end
+    end
+    self:_deleteChapters(read)
+end
+
+function KavitaBrowser:_deleteReadOnServer(server_key)
+    local read = {}
+    for _, c in ipairs(self:_chaptersFromIndex(server_key)) do
+        if self:_isChapterRead(server_key, c.seriesId, c) then read[#read + 1] = c end
+    end
+    self:_deleteChapters(read)
+end
+
+function KavitaBrowser:_deleteSeriesCache(server_key, series_id)
+    if not server_key or not series_id then return end
+    local store = self:_store()
+    local queue = self:_queue()
+    local chapters = self:_chaptersFromIndex(server_key, series_id)
+    local filtered = {}
+    for _, c in ipairs(chapters) do
+        if not self:_isChapterOpen(server_key, c.chapterId) then filtered[#filtered + 1] = c end
+    end
+    if #filtered == 0 then
+        UIManager:show(InfoMessage:new{ text = _("Close the book before deleting its cache") })
+        return
+    end
+    local usage = store:server_usage(server_key)
+    local series_bytes = 0
+    for _, c in ipairs(filtered) do series_bytes = series_bytes + (tonumber(c.bytes) or 0) end
+    local dialog
+    dialog = ConfirmBox:new{
+        text = T(_("Delete all cached chapters of this series? About %1 will be freed. Progress records are kept."),
+            format_bytes(series_bytes)),
+        ok_text = _("Delete"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            for _, c in ipairs(filtered) do
+                if queue:contains(server_key, c.chapterId) then queue:abort(server_key, c.chapterId) end
+            end
+            store:delete_series(server_key, series_id)
+            UIManager:show(InfoMessage:new{
+                text = T(_("Deleted this series cache, freed %1"), format_bytes(series_bytes)),
+            })
+            self:onCacheStateChanged()
+            if self.view_kind == "offline_series" or self.view_kind == "series" then
+                UIManager:nextTick(function()
+                    if self.view_kind == "offline_series" then
+                        self:onReturn()
+                    else
+                        self:refreshCurrentView()
+                    end
+                end)
+            end
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_clearServerCache(server_key)
+    local store = self:_store()
+    local queue = self:_queue()
+    local usage = store:server_usage(server_key)
+    if usage.chapters == 0 and usage.used == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No cache for this server") })
+        return
+    end
+    local dialog
+    dialog = ConfirmBox:new{
+        text = T(_("Clear all cache for this server? %1 chapters · about %2. Reading progress records are kept."),
+            usage.chapters, format_bytes(usage.used)),
+        ok_text = _("Clear"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            for _, c in ipairs(self:_chaptersFromIndex(server_key)) do
+                if queue:contains(server_key, c.chapterId) then queue:abort(server_key, c.chapterId) end
+            end
+            store:delete_server(server_key)
+            UIManager:show(InfoMessage:new{
+                text = T(_("Cache cleared, freed %1"), format_bytes(usage.used)),
+            })
+            self:onCacheStateChanged()
+            self:showCacheShelf(true)
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_clearAllCache()
+    local store = self:_store()
+    local queue = self:_queue()
+    local usage = store:total_usage()
+    local keys = store:list_server_keys()
+    local dialog
+    dialog = ConfirmBox:new{
+        text = T(_("Clear all cache, including unlinked servers? %1 chapters · about %2. Reading progress records are kept."),
+            usage.chapters, format_bytes(usage.used)),
+        ok_text = _("Clear all"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            for _, key in ipairs(keys) do
+                for _, c in ipairs(self:_chaptersFromIndex(key)) do
+                    if queue:contains(key, c.chapterId) then queue:abort(key, c.chapterId) end
+                end
+            end
+            store:delete_all()
+            UIManager:show(InfoMessage:new{
+                text = T(_("All cache cleared, freed %1"), format_bytes(usage.used)),
+            })
+            self:onCacheStateChanged()
+            self:showCacheShelf(true)
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_updateCachedChapters(chapters)
+    local key = self:_serverKeyForCurrent()
+    local sid = self.current_series_id
+    if not key or not sid or not chapters or #chapters == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No outdated chapters") })
+        return
+    end
+    local store = self:_store()
+    local dialog
+    dialog = ConfirmBox:new{
+        text = T(_("Update %1 outdated chapter(s)? They cannot be read offline while updating."), #chapters),
+        ok_text = _("Update"),
+        ok_callback = function()
+            UIManager:close(dialog)
+            for _, c in ipairs(chapters) do
+                self:_queue():abort(key, c.id)
+                store:delete_chapter(key, sid, c.id)
+            end
+            local entries = self:_cacheEntriesFor(chapters)
+            local ok, err = self:_queue():enqueue(entries)
+            if not ok then
+                UIManager:show(InfoMessage:new{ text = tostring(err) })
+            else
+                UIManager:show(InfoMessage:new{ text = T(_("Queued %1 chapter(s) for update"), #entries) })
+            end
+            self:onCacheStateChanged()
+            self:refreshCurrentView()
+        end,
+    }
+    UIManager:show(dialog)
+end
+
+function KavitaBrowser:_updateStaleInSeries()
+    local key = self:_serverKeyForCurrent()
+    local sid = self.current_series_id
+    if not key or not sid then return end
+    local store = self:_store()
+    local stale = {}
+    for _, c in ipairs(self._series_chapters_cache or {}) do
+        local meta = store:read_meta(key, sid, c.id)
+        if meta and store:is_stale(key, sid, c.id) then stale[#stale + 1] = c end
+    end
+    self:_updateCachedChapters(stale)
+end
+
+function KavitaBrowser:_checkForUpdates(server_key)
+    if not server_key then server_key = self:_serverKeyForCurrent() end
+    if self.offline or NetworkMgr:isOnline() == false then
+        UIManager:show(InfoMessage:new{ text = _("Connect to check for cache updates") })
+        return
+    end
+    local key = server_key or self:_serverKeyForCurrent()
+    if not key then return end
+    local store = self:_store()
+    local series_ids = store:list_series_ids(key)
+    local loading = InfoMessage:new{ text = _("Checking for updates…"), timeout = 0 }
+    UIManager:show(loading)
+    UIManager:forceRePaint()
+    local marked = 0
+    for _, sid in ipairs(series_ids) do
+        local detail = KavitaClient:getSeriesDetail(sid)
+        if type(detail) == "table" then
+            local chapters = self:_normalizeSeriesChapters(detail)
+            local flags = {}
+            for _, c in ipairs(chapters) do
+                local meta = store:read_meta(key, sid, c.id)
+                if meta and meta.fingerprint then
+                    local stale = meta.fingerprint ~= c.fingerprint
+                    flags[c.id] = stale
+                    if stale then marked = marked + 1 end
+                end
+            end
+            store:update_stale(key, flags)
+        end
+    end
+    UIManager:close(loading)
+    UIManager:show(InfoMessage:new{
+        text = T(_("%1 chapter(s) need updating"), marked),
+    })
+    if self.view_kind == "shelf" then self:showCacheShelf(true) end
+end
+
+function KavitaBrowser:_setCacheLimitDialog()
+    if not self.kamare_settings then return end
+    local current = self.kamare_settings and tonumber(self.kamare_settings:readSetting("cache_limit_mb", 0)) or 0
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Cache size limit (MB, 0 = no limit)"),
+        input = current > 0 and tostring(current) or "",
+        input_type = "number",
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Save"), is_enter_default = true, callback = function()
+                local value = tonumber(dialog:getInputText()) or 0
+                UIManager:close(dialog)
+                self.kamare_settings:saveSetting("cache_limit_mb", math.max(0, value))
+                pcall(function() self.kamare_settings:flush() end)
+                UIManager:show(InfoMessage:new{
+                    text = value > 0 and T(_("Cache limit set to %1 MB"), value) or _("Cache limit disabled"),
+                })
+            end },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function KavitaBrowser:_cacheSortMode()
+    if not self.kamare_settings then return "name" end
+    return self.kamare_settings:readSetting("cache_shelf_sort", "name")
+end
+
+function KavitaBrowser:_cycleCacheSort()
+    if not self.kamare_settings then return end
+    local order = { "name", "usage", "recent" }
+    local current = self:_cacheSortMode()
+    local index = 1
+    for i, v in ipairs(order) do if v == current then index = i end end
+    local next_mode = order[(index % #order) + 1]
+    self.kamare_settings:saveSetting("cache_shelf_sort", next_mode)
+    pcall(function() self.kamare_settings:flush() end)
+    self:showCacheShelf(true)
+end
+
 function KavitaBrowser:_syncNow()
     if self.offline or NetworkMgr:isOnline() == false then
         UIManager:show(InfoMessage:new{ text = _("Offline · progress will sync after reconnecting") })
@@ -991,6 +1376,61 @@ function KavitaBrowser:showTitleMenu()
             callback = function()
                 UIManager:close(dialog)
                 self:showKavitaSearchDialog()
+            end,
+            align = "left",
+        }})
+    end
+
+    if self.view_kind == "shelf" then
+        local key = self.current_server_key or self:_serverKeyForCurrent()
+        table.insert(buttons, {{
+            text = _("Sort cached series: ") .. self:_cacheSortMode(),
+            callback = function()
+                UIManager:close(dialog)
+                self:_cycleCacheSort()
+            end,
+            align = "left",
+        }})
+        table.insert(buttons, {{
+            text = _("Delete read chapters (this server)"),
+            callback = function()
+                UIManager:close(dialog)
+                if key then self:_deleteReadOnServer(key)
+                else UIManager:show(InfoMessage:new{ text = _("No server selected") }) end
+            end,
+            align = "left",
+        }})
+        table.insert(buttons, {{
+            text = _("Check for cache updates"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_checkForUpdates(key)
+            end,
+            align = "left",
+        }})
+        table.insert(buttons, {{
+            text = _("Cache size limit…"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_setCacheLimitDialog()
+            end,
+            align = "left",
+        }})
+        if key then
+            table.insert(buttons, {{
+                text = _("Clear this server cache"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:_clearServerCache(key)
+                end,
+                align = "left",
+            }})
+        end
+        table.insert(buttons, {{
+            text = _("Clear all cache (including unlinked)"),
+            callback = function()
+                UIManager:close(dialog)
+                self:_clearAllCache()
             end,
             align = "left",
         }})
@@ -1040,6 +1480,30 @@ function KavitaBrowser:showTitleMenu()
                 callback = function()
                     UIManager:close(dialog)
                     self:_showSeriesDownloadDialog()
+                end,
+                align = "left",
+            }})
+            table.insert(buttons, {{
+                text = _("Update outdated chapters"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:_updateStaleInSeries()
+                end,
+                align = "left",
+            }})
+            table.insert(buttons, {{
+                text = _("Delete read chapters in this series"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:_deleteReadInSeries()
+                end,
+                align = "left",
+            }})
+            table.insert(buttons, {{
+                text = _("Delete all cached chapters in this series"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:_deleteSeriesCache(self:_serverKeyForCurrent(), self.current_series_id)
                 end,
                 align = "left",
             }})
@@ -2800,6 +3264,48 @@ end
 
 -- Menu action on item long-press (dialog Edit / Delete catalog)
 function KavitaBrowser:onMenuHold(item)
+    if item.cache_shelf_series then
+        local dialog
+        local buttons = {
+            {
+                {
+                    text = _("Open"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:onMenuSelect(item)
+                    end,
+                },
+                {
+                    text = _("Delete read chapters"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self.current_server_key = item._cache_server_key
+                        self.current_series_id = item._cache_series_id
+                        local read = {}
+                        for _, c in ipairs(self:_chaptersFromIndex(item._cache_server_key, item._cache_series_id)) do
+                            if self:_isChapterRead(item._cache_server_key, item._cache_series_id, c) then
+                                read[#read + 1] = c
+                            end
+                        end
+                        self:_deleteChapters(read)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Delete series cache"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:_deleteSeriesCache(item._cache_server_key, item._cache_series_id)
+                    end,
+                },
+            },
+        }
+        dialog = ButtonDialog:new{ title = item.text, title_align = "center", buttons = buttons }
+        UIManager:show(dialog)
+        return true
+    end
+
     -- Handle series long-press for continue reading
     if item.kavita_series and item.series then
         local series = item.series
@@ -3009,7 +3515,8 @@ function KavitaBrowser:onMenuHold(item)
 
         do
             local cache_key = self:_serverKeyForCurrent()
-            if cache_key and not self:_store():has_meta(cache_key, self.current_series_id, chapter.id) then
+            local meta = cache_key and self:_store():read_meta(cache_key, self.current_series_id, chapter.id)
+            if cache_key and not meta then
                 table.insert(buttons, {})
                 table.insert(buttons, {
                     {
@@ -3032,6 +3539,50 @@ function KavitaBrowser:onMenuHold(item)
                                     files = chapter.files,
                                 },
                             }))
+                        end,
+                    },
+                })
+            elseif cache_key and meta then
+                local bytes = 0
+                for _, f in ipairs(chapter.files or {}) do
+                    bytes = bytes + (tonumber(f.bytes) or 0)
+                end
+                local descriptor = {
+                    id = chapter.id, volumeId = chapter.volumeId, number = chapter.number,
+                    title = Utils.buildChapterTitle(chapter), pages = pages,
+                    order = chapter.order, bytes = bytes, pagesRead = chapter.pagesRead,
+                    koreaderHash = chapter.files and chapter.files[1] and chapter.files[1].koreaderHash,
+                    files = chapter.files,
+                }
+                table.insert(buttons, {})
+                if self:_store():is_stale(cache_key, self.current_series_id, chapter.id) then
+                    table.insert(buttons, {
+                        {
+                            text = "\u{21BB} " .. _("Update cache"),
+                            callback = function()
+                                UIManager:close(dialog)
+                                self:_updateCachedChapters({ descriptor })
+                            end,
+                        },
+                    })
+                end
+                table.insert(buttons, {
+                    {
+                        text = self:_isChapterOpen(cache_key, chapter.id)
+                            and _("Delete cached chapter (close the book first)")
+                            or _("Delete cached chapter"),
+                        callback = function()
+                            UIManager:close(dialog)
+                            if self:_isChapterOpen(cache_key, chapter.id) then
+                                UIManager:show(InfoMessage:new{ text = _("Close the book before deleting its cache") })
+                                return
+                            end
+                            self:_deleteChapters({
+                                {
+                                    serverKey = cache_key, seriesId = self.current_series_id,
+                                    chapterId = chapter.id, pages = pages, bytes = bytes,
+                                },
+                            })
                         end,
                     },
                 })
@@ -3209,6 +3760,26 @@ function KavitaBrowser:onMenuHold(item)
                             callback = function()
                                 UIManager:close(dialog)
                                 self:_confirmAndEnqueue(entries)
+                            end,
+                        },
+                    })
+                end
+                local cached_descriptors = {}
+                for _, d in ipairs(descriptors) do
+                    if self:_store():has_meta(cache_key, self.current_series_id, d.id) then
+                        cached_descriptors[#cached_descriptors + 1] = {
+                            serverKey = cache_key, seriesId = self.current_series_id,
+                            chapterId = d.id, pages = d.pages, bytes = d.bytes,
+                        }
+                    end
+                end
+                if #cached_descriptors > 0 then
+                    table.insert(buttons, {
+                        {
+                            text = _("Delete volume cache"),
+                            callback = function()
+                                UIManager:close(dialog)
+                                self:_deleteChapters(cached_descriptors)
                             end,
                         },
                     })

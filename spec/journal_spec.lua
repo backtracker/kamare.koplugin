@@ -247,6 +247,33 @@ return function(t)
         t.eq(c.order[2], 2, "later session pushed second")
     end
 
+    -- deleting the cache never touches the journal (acceptance D9/C10)
+    do
+        local Store = require("kamarecachestore")
+        local dir = t.tmpdir()
+        local journal = Journal:new{ settings_dir = dir, scheduler = fake_scheduler(), clock = function() return 5000 end }
+        journal:load()
+        journal:set_position(entry(100), 60, { source = "offline" })
+        journal:touch_session(entry(100), 59, 60, { startTs = 4000, endTs = 5000 })
+        journal:force_flush()
+
+        local store = Store:new{ data_dir = dir }
+        assert(store:write_meta({
+            serverKey = "srv1", seriesId = 20, chapterId = 100, pages = 100,
+            seriesName = "Series", chapterTitle = "Ch",
+        }))
+        store:delete_all()
+
+        local reloaded = Journal:new{ settings_dir = dir, clock = function() return 5000 end }
+        reloaded:load()
+        t.eq(reloaded:pending_count(), 1, "pending progress survives cache deletion")
+        t.eq(#reloaded:get_sessions(), 1, "sessions survive cache deletion")
+        local c = fake_client({ remote = {} })
+        local summary = reloaded:sync(c)
+        t.eq(summary.pushed, 1, "self-contained journal still syncs after cache deletion")
+        t.eq(c.posts[1].chapterId, 100, "pushed the deleted chapter")
+    end
+
     -- offline sessions: start/update/end, online sessions ignored
     do
         local j, _, clock = make(t)

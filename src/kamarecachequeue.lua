@@ -212,6 +212,20 @@ function Queue:enqueue(entries, opts)
 
     if #accepted == 0 then return nil, _("Already cached or queued") end
 
+    -- Optional absolute cap (default off): quota applies to the whole cache.
+    if self.settings then
+        local limit_mb = tonumber(self.settings:readSetting("cache_limit_mb", 0)) or 0
+        if limit_mb > 0 then
+            local limit = limit_mb * 1024 * 1024
+            local used = self.store:total_usage().used
+            if used + total > limit then
+                return nil, string.format(_("Cache limit reached: %s of %s used"),
+                    string.format("%.0f MB", used / (1024 * 1024)),
+                    string.format("%.0f MB", limit / (1024 * 1024)))
+            end
+        end
+    end
+
     local available = self.store:free_bytes()
     if available and total > available then
         return nil, string.format(_("Not enough space: need %.0f MB, %.0f MB available"),
