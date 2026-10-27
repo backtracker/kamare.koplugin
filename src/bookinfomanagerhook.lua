@@ -262,22 +262,31 @@ end
 local function hooked_getBookInfo(self, filepath, do_cover_image)
     local info = original_getBookInfo(self, filepath, do_cover_image)
     local virtual = virtual_info[filepath]
-    if virtual then
-        if type(info) ~= "table" then
-            info = {
-                filesize = 0,
-                filemtime = os.time(),
-                in_progress = 0,
-                cover_fetched = "Y",
-            }
-        end
-        -- Make CoverBrowser use these strings instead of the file name, and
-        -- hide the synthetic ".kavita"/".kamare" extension on the right.
-        info.ignore_meta = false
-        info._no_provider = true
-        if virtual.title then info.title = virtual.title end
-        if virtual.author then info.authors = virtual.author end
+    if not virtual then return info end
+
+    local is_stub = type(info) ~= "table" or info._no_provider
+    if is_stub and isKavitaPath(filepath) then
+        -- No DB row yet. Returning a table here would set bookinfo_found in
+        -- CoverBrowser and suppress its background extraction, so no cover
+        -- would ever be fetched. Return nil and let it extract metadata and
+        -- the cover; the item text is used until then.
+        return nil
     end
+    if is_stub then
+        -- Cache-only path: nothing to extract, supply display fields.
+        info = {
+            filesize = 0,
+            filemtime = os.time(),
+            in_progress = 0,
+            cover_fetched = "Y",
+        }
+    end
+    -- Make CoverBrowser use these strings instead of the file name, and hide
+    -- the synthetic ".kavita"/".kamare" extension on the right.
+    info.ignore_meta = false
+    info._no_provider = true
+    if virtual.title then info.title = virtual.title end
+    if virtual.author then info.authors = virtual.author end
     return info
 end
 
