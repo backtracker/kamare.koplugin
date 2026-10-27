@@ -191,6 +191,7 @@ function KamareImageViewer:init()
     end
 
     self:loadSettings()
+    self:_resolveLocalCache()
 
     if self.override_view_mode ~= nil then
         local override_mode = self.override_view_mode
@@ -305,6 +306,63 @@ function KamareImageViewer:init()
         -- Fill initial prefetch buffer after UI is ready
         self:_initialPrefetchBuffer()
     end)
+end
+
+-- The browser decides local vs network explicitly. Other callers (Moon's
+-- Kavita source) don't pass page_source, and used to stream images even when
+-- the chapter was already cached. Resolve a complete cache entry from the
+-- chapter identity so a cached chapter never downloads images again.
+function KamareImageViewer:_resolveLocalCache()
+    if self.page_source ~= nil then return end
+    local metadata = self.metadata
+    local chapter_id = metadata and tonumber(metadata.chapterId or metadata.chapter_id)
+    local series_id = metadata and tonumber(metadata.seriesId)
+    if not chapter_id or not series_id then return end
+
+    local Store = require("kamarecachestore")
+    local store = Store:new{}
+    local key = metadata.serverKey
+    if not key and self.kamare_settings then
+        key = store:find_server_key(self.kamare_settings, {
+            base_url = KavitaClient.base_url,
+        })
+    end
+    local meta
+    if key then meta = store:read_meta(key, series_id, chapter_id) end
+    if not meta then
+        for __, candidate in ipairs(store:list_server_keys()) do
+            meta = store:read_meta(candidate, series_id, chapter_id)
+            if meta then
+                key = candidate
+                break
+            end
+        end
+    end
+    if not meta or (tonumber(meta.pages) or 0) <= 0 then return end
+
+    self.page_source = "local"
+    self.local_meta = meta
+    self.cache_store = store
+    self.cache_server_key = key
+    self.images_list_nb = meta.pages
+    if not self.cache_journal then
+        local Journal = require("kamarejournal")
+        local journal = Journal:new{ scheduler = UIManager }
+        journal:load()
+        self.cache_journal = journal
+    end
+    -- Prefer cached dimensions over any dimensions the caller may have fetched.
+    if type(meta.dims) == "table" and #meta.dims > 0 then
+        self.preloaded_dimensions = {}
+        for i, d in ipairs(meta.dims) do
+            local w, h = d[1] or 0, d[2] or 0
+            self.preloaded_dimensions[i] = {
+                pageNumber = i, width = w, height = h, isWide = w > h,
+                fileName = string.format("%04d.jpg", i),
+            }
+        end
+    end
+    logger.info("[kamare:cache] viewer using cached chapter", key, series_id, chapter_id)
 end
 
 function KamareImageViewer:_initDocument()

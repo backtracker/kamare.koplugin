@@ -3225,7 +3225,9 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         metadata = metadata,
         kamare_settings = self.kamare_settings,
         override_view_mode = override_view_mode,
-        page_source = local_mode and "local" or "network",
+        -- nil lets the viewer re-check the cache by chapter identity, so a
+        -- key mismatch here cannot force an unnecessary network read.
+        page_source = local_mode and "local" or nil,
         offline = self.offline == true,
         local_meta = local_meta,
         cache_store = local_mode and cache_store or nil,
