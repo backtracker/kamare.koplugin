@@ -1340,9 +1340,13 @@ function KavitaBrowser:_deleteReadInSeries()
 end
 
 function KavitaBrowser:_deleteReadOnServer(server_key)
+    -- nil = every cached server (the cache shelf has no "current server").
+    local keys = server_key and { server_key } or self:_store():list_server_keys()
     local read = {}
-    for __, c in ipairs(self:_chaptersFromIndex(server_key)) do
-        if self:_isChapterRead(server_key, c.seriesId, c) then read[#read + 1] = c end
+    for __, key in ipairs(keys) do
+        for __, c in ipairs(self:_chaptersFromIndex(key)) do
+            if self:_isChapterRead(key, c.seriesId, c) then read[#read + 1] = c end
+        end
     end
     self:_deleteChapters(read)
 end
@@ -1554,6 +1558,13 @@ function KavitaBrowser:_cacheSortMode()
     return self.kamare_settings:readSetting("cache_shelf_sort", "name")
 end
 
+function KavitaBrowser:_cacheSortText()
+    local mode = self:_cacheSortMode()
+    if mode == "usage" then return _("Sort cached series: usage") end
+    if mode == "recent" then return _("Sort cached series: recent") end
+    return _("Sort cached series: name")
+end
+
 function KavitaBrowser:_cycleCacheSort()
     if not self.kamare_settings then return end
     local order = { "name", "usage", "recent" }
@@ -1655,7 +1666,7 @@ function KavitaBrowser:showTitleMenu()
     if self.view_kind == "shelf" then
         local key = self.current_server_key or self:_serverKeyForCurrent()
         table.insert(buttons, {{
-            text = _("Sort cached series: ") .. self:_cacheSortMode(),
+            text = self:_cacheSortText(),
             callback = function()
                 UIManager:close(dialog)
                 self:_cycleCacheSort()
@@ -1663,11 +1674,10 @@ function KavitaBrowser:showTitleMenu()
             align = "left",
         }})
         table.insert(buttons, {{
-            text = _("Delete read chapters (this server)"),
+            text = _("Delete read chapters"),
             callback = function()
                 UIManager:close(dialog)
-                if key then self:_deleteReadOnServer(key)
-                else UIManager:show(InfoMessage:new{ text = _("No server selected") }) end
+                self:_deleteReadOnServer(key)
             end,
             align = "left",
         }})
@@ -1698,7 +1708,7 @@ function KavitaBrowser:showTitleMenu()
             }})
         end
         table.insert(buttons, {{
-            text = _("Clear all cache (including unlinked)"),
+            text = _("Clear all cache"),
             callback = function()
                 UIManager:close(dialog)
                 self:_clearAllCache()

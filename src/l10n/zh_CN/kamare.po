@@ -666,8 +666,8 @@ msgstr "清空"
 msgid "Clear all"
 msgstr "全部清空"
 
-msgid "Clear all cache (including unlinked)"
-msgstr "清空全部缓存（含未关联）"
+msgid "Clear all cache"
+msgstr "清空全部缓存"
 
 msgid "Clear all cache for this server? %1 chapters · about %2. Reading progress records are kept."
 msgstr "清空本服务器的全部缓存？%1 章 · 约 %2。阅读进度记录会保留。"
@@ -704,9 +704,6 @@ msgstr "删除本章缓存（请先关闭本书）"
 
 msgid "Delete read chapters"
 msgstr "删除已读章节"
-
-msgid "Delete read chapters (this server)"
-msgstr "删除已读章节（本服务器）"
 
 msgid "Delete read chapters in this series"
 msgstr "删除本系列的已读章节"
@@ -882,8 +879,14 @@ msgstr "继续下载"
 msgid "Series %1"
 msgstr "系列 %1"
 
-msgid "Sort cached series: "
-msgstr "排序已缓存系列："
+msgid "Sort cached series: name"
+msgstr "排序已缓存系列：名称"
+
+msgid "Sort cached series: usage"
+msgstr "排序已缓存系列：占用"
+
+msgid "Sort cached series: recent"
+msgstr "排序已缓存系列：最近"
 
 msgid "Sync failed"
 msgstr "同步失败"
