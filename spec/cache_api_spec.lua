@@ -852,6 +852,51 @@ return function(t)
     t.eq(runcode, "viewer_running", "open viewer_running code")
     package.loaded["kamareimageviewer"] = nil
 
+    -- A cached chapter opened at an explicit start page still needs the read
+    -- tier: the viewer writes the offline session to the journal on close.
+    local sj_dir = t.tmpdir()
+    local sj_store = Store:new{ data_dir = sj_dir }
+    local sj_settings = fake_settings()
+    Cache.set_context(nil)
+    Cache.set_context{
+        store = sj_store, settings = sj_settings, client = {},
+    }
+    meta(sj_store, 60, { pages = 5 })
+    local captured
+    package.loaded["kamareimageviewer"] = {
+        active_instance = nil,
+        new = function(_, o)
+            captured = o
+            return { _aborted = false }
+        end,
+    }
+    local viewer = Cache.open{
+        base_url = "https://example", api_key = "k",
+        entry = { chapterId = 60, seriesId = 20, volumeId = 30, libraryId = 10, pages = 5 },
+        start_page = 3,
+    }
+    t.ok(viewer ~= nil, "open returns a viewer for a cached chapter at a start page")
+    t.eq(captured and captured.metadata.startPage, 3, "explicit start page wins")
+    t.eq(captured and captured.page_source, "local", "cached chapter reads from disk")
+    t.ok(captured and captured.cache_journal ~= nil,
+        "cached open carries a journal even with an explicit start page")
+    t.eq(captured and captured.cache_journal, Cache.get_context().journal,
+        "open builds and passes the read-tier journal")
+    -- The viewer's close path writes the physical page through this seam.
+    captured.cache_journal:set_position({
+        serverKey = captured.cache_server_key,
+        libraryId = captured.metadata.libraryId,
+        seriesId = captured.metadata.seriesId,
+        volumeId = captured.metadata.volumeId,
+        chapterId = captured.metadata.chapterId,
+        seriesName = captured.metadata.seriesName,
+        chapterTitle = captured.metadata.chapterTitle,
+    }, 4, { source = "offline", force = true })
+    local closed = Cache.resume_page("https://example", 60, 20)
+    t.eq(closed and closed.page, 4, "the position written on close is readable")
+    t.eq(closed and closed.source, "journal", "close records a journal-sourced position")
+    package.loaded["kamareimageviewer"] = nil
+
     Cache.set_context(nil)
     t.is_nil(Cache.get_context(), "set_context(nil) resets for the next spec")
 end

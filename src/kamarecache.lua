@@ -779,7 +779,7 @@ local function dimensions_from_client(client, chapter_id)
     return out
 end
 
-local function iswide_map(dimensions)
+local function is_wide_map(dimensions)
     local out = {}
     if type(dimensions) == "table" then
         for __, d in ipairs(dimensions) do
@@ -834,10 +834,16 @@ function Cache.open(opts)
     end
 
     local start_page = tonumber(opts.start_page)
+    if meta then
+        -- A cached chapter always builds the read tier, even when a start page
+        -- is explicit: the viewer records the offline session in the journal
+        -- on close, so progress is never lost (deviation from 01 A2, see the
+        -- module header).
+        ctx = ensure_read()
+    end
     if start_page then
         start_page = math.max(1, math.min(start_page, pages))
     elseif meta then
-        ctx = ensure_read()
         local resume = Cache.resume_page(base_url, chapter_id, series_id)
         start_page = resume and resume.page or 1
     elseif not offline and ctx.client and ctx.client.getReaderProgress then
