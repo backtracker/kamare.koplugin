@@ -424,10 +424,29 @@ function KavitaBrowser:_chapterStatus(server_key, series_id, chapter, cache)
     return nil
 end
 
+-- Most recently read chapter of the series: newest journal ts wins, else the
+-- furthest chapter with server-side progress. Returns an index in `chapters`.
+function KavitaBrowser:_currentChapterIndex(chapters, server_key)
+    local best_ts, best_index, furthest_index
+    for i, c in ipairs(chapters or {}) do
+        local id = c.id or c.chapterId
+        local pos = id and self:_journal():get_position(server_key, id)
+        if pos and tonumber(pos.pageNum) and tonumber(pos.pageNum) > 0 then
+            local ts = tonumber(pos.ts) or 0
+            if not best_ts or ts > best_ts then best_ts, best_index = ts, i end
+            furthest_index = i
+        elseif (tonumber(c.pagesRead) or 0) > 0 then
+            furthest_index = i
+        end
+    end
+    return best_index or furthest_index
+end
+
 function KavitaBrowser:_volumeStatus(server_key, series_id, volume, cache)
     local chapters = (type(volume.chapters) == "table") and volume.chapters or {}
     local total, cached, reading, stale = 0, 0, false, false
     local in_flight, progress_done, progress_total = 0, 0, 0
+    local active_download, extracting = false, false
     local queue = self:_queue()
     cache = cache or self:_cacheStatusContext(server_key)
     local queued = {}
@@ -453,6 +472,8 @@ function KavitaBrowser:_volumeStatus(server_key, series_id, volume, cache)
                 progress_done = progress_done + done
                 progress_total = progress_total
                     + (entry_total > 0 and entry_total or (tonumber(ch.bytes) or 0))
+                if entry.state == "downloading" then active_download = true end
+                if entry.state == "extracting" then extracting = true end
             end
         end
     end
@@ -461,13 +482,19 @@ function KavitaBrowser:_volumeStatus(server_key, series_id, volume, cache)
         return reading and _("Reading · cached") or _("Cached")
     end
     if in_flight > 0 then
-        local label = T(_("%1/%2 cached"), cached, total)
+        -- Nothing cached yet: the 0/N count is noise, show the transfer state.
+        local prefix = cached > 0 and (T(_("%1/%2 cached"), cached, total) .. " · ") or ""
+        if extracting and not active_download then
+            return prefix .. _("Extracting")
+        elseif not active_download then
+            return prefix .. _("Queued")
+        end
         if progress_total > 0 then
-            return label .. string.format(" · %d%% · %s / %s",
+            return prefix .. string.format("%d%% · %s / %s",
                 math.floor(progress_done / progress_total * 100 + 0.5),
                 format_bytes(progress_done), format_bytes(progress_total))
         end
-        return label .. " · " .. _("Downloading…")
+        return prefix .. _("Downloading…")
     end
     if cached > 0 then return T(_("%1/%2 cached"), cached, total) end
     return nil
@@ -742,14 +769,8 @@ function KavitaBrowser:_showSeriesDownloadDialog()
             text = _("From current progress"),
             callback = function()
                 UIManager:close(dialog)
-                local start = 1
-                for i, c in ipairs(cache) do
-                    local pos = self:_journal():get_position(self:_serverKeyForCurrent() or "", c.id)
-                    if (pos and pos.pageNum and pos.pageNum > 0) or (c.pagesRead and c.pagesRead > 0) then
-                        start = i
-                        break
-                    end
-                end
+                local key = self:_serverKeyForCurrent() or ""
+                local start = self:_currentChapterIndex(cache, key) or 1
                 local slice = {}
                 for i = start, #cache do slice[#slice + 1] = cache[i] end
                 self:_confirmAndEnqueue(self:_cacheEntriesFor(slice))
@@ -790,31 +811,61 @@ function KavitaBrowser:_enqueueNextVolumes(n)
     if not detail then return end
     local key = self:_serverKeyForCurrent()
     local store = self:_store()
+    local sid = self.current_series_id
     local volumes = {}
     for __, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
     table.sort(volumes, function(a, b) return (tonumber(a.number) or 0) < (tonumber(b.number) or 0) end)
 
-    -- Start after the last volume that already has a cached chapter.
-    local start = 1
+    -- Anchor after the volume currently being read (newest journal position).
+    local flattened = {}
     for i, v in ipairs(volumes) do
         for __, ch in ipairs(v.chapters or {}) do
-            if store:has_meta(key, self.current_series_id, ch.id) then start = i + 1 end
+            flattened[#flattened + 1] = { id = ch.id, pagesRead = ch.pagesRead, _volume_index = i }
         end
     end
-    local chapters = {}
-    for i = start, math.min(#volumes, start + n - 1) do
-        for __, ch in ipairs(volumes[i].chapters or {}) do
-            chapters[#chapters + 1] = {
-                id = ch.id, volumeId = ch.volumeId, number = ch.number,
-                title = Utils.buildChapterTitle(ch), pages = ch.pages,
-                order = ch.order, bytes = 0, pagesRead = ch.pagesRead,
-                koreaderHash = ch.files and ch.files[1] and ch.files[1].koreaderHash,
-                files = ch.files,
-            }
-            for __, f in ipairs(ch.files or {}) do
-                chapters[#chapters].bytes = chapters[#chapters].bytes + (tonumber(f.bytes) or 0)
+    local current = self:_currentChapterIndex(flattened, key)
+    local start
+    if current then
+        start = flattened[current]._volume_index + 1
+    else
+        -- No reading progress: continue after the last volume with cached data.
+        start = 1
+        for i, v in ipairs(volumes) do
+            for __, ch in ipairs(v.chapters or {}) do
+                if store:has_meta(key, sid, ch.id) then start = i + 1 end
             end
         end
+    end
+
+    -- Pick the next N volumes that still have uncached chapters.
+    local chapters, picked = {}, 0
+    for i = start, #volumes do
+        local missing = {}
+        for __, ch in ipairs(volumes[i].chapters or {}) do
+            if not store:has_meta(key, sid, ch.id) then
+                missing[#missing + 1] = ch
+            end
+        end
+        if #missing > 0 then
+            for __, ch in ipairs(missing) do
+                chapters[#chapters + 1] = {
+                    id = ch.id, volumeId = ch.volumeId, number = ch.number,
+                    title = Utils.buildChapterTitle(ch), pages = ch.pages,
+                    order = ch.order, bytes = 0, pagesRead = ch.pagesRead,
+                    koreaderHash = ch.files and ch.files[1] and ch.files[1].koreaderHash,
+                    files = ch.files,
+                }
+                for __, f in ipairs(ch.files or {}) do
+                    chapters[#chapters].bytes = chapters[#chapters].bytes + (tonumber(f.bytes) or 0)
+                end
+            end
+            picked = picked + 1
+            if picked >= n then break end
+        end
+    end
+    if #chapters == 0 then
+        UIManager:show(InfoMessage:new{ text = _("Everything selected is already cached") })
+        return
     end
     self:_confirmAndEnqueue(self:_cacheEntriesFor(chapters))
 end
