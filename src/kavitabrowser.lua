@@ -1,6 +1,8 @@
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
-local InfoMessage = require("ui/widget/infomessage")
+-- Transient notices auto-dismiss; explicit `timeout = 0` still means "keep
+-- open until the code closes it" (loading messages).
+local InfoMessage = require("ui/widget/infomessage"):extend{ timeout = 5 }
 local InputDialog = require("ui/widget/inputdialog")
 local Menu = require("ui/widget/menu")
 local MultiInputDialog = require("ui/widget/multiinputdialog")
