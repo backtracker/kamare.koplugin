@@ -447,15 +447,34 @@ return function(t)
         end
     end
 
-    -- page-order failure also falls back to per-page
+    -- page-order failure also falls back to per-page, and is remembered so a
+    -- retry does not download the archive again
     do
         local arch = fake_archive({ extract_err = "page order mismatch against file-dimensions" })
-        local q, store, _, scheduler = make(t, { archive = arch })
+        local q, store, settings, scheduler = make(t, { archive = arch })
         q:enqueue({ entry() })
         scheduler:pump()
         local meta = store:read_meta("srv1", 20, 100)
         t.eq(meta and meta.source, "per-page", "per-page meta after page-order failure")
         t.eq(q.fetch.calls, 3, "page requests after fallback")
+        t.ok(settings.data.archive_order_mismatch
+            and settings.data.archive_order_mismatch["srv1:100"],
+            "page-order verdict remembered")
+    end
+
+    -- a remembered page-order mismatch skips the archive on retry
+    do
+        local q, _, settings = make(t)
+        local e = entry()
+        t.ok(not q:_order_flagged(e), "chapter not flagged initially")
+        q:_set_order_flag(e, true)
+        t.ok(q:_order_flagged(e), "chapter flagged after a mismatch")
+        local needs = q:_needs_per_page(e)
+        t.ok(needs, "flagged chapter goes straight to per-page")
+        q:_set_order_flag(e, false)
+        t.ok(not q:_order_flagged(e), "flag cleared after success")
+        t.ok(not q:_needs_per_page(e), "archive path allowed again")
+        t.ok(settings.data.archive_order_mismatch ~= nil, "flag table persisted")
     end
 
     -- multi-file chapters go straight to per-page

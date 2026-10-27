@@ -13,10 +13,11 @@ Integration branch: `feat/kavita-offline-cache`, plugin version `0.10.0`, cache 
 The runner boots the KOReader emulator LuaJIT runtime (`v2026.07.2-207`) with the real
 `rapidjson`, `libarchive` and `lfs` modules. It uses no external network; the only socket
 traffic is a loopback HTTP fixture (`spec/fixtures/range_server.py`) used by the file-sink
-tests. Last run: **297 assertions passed, 0 failed**.
+tests. Last run: **349 assertions passed, 0 failed**.
 
-There is no Kavita API key on this machine, so anything that requires a real server is
-listed as manual below.
+Anything that needs a live Kavita server is listed as manual below. (One real archive was
+checked during debugging: a 196-page nested volume produced the same 196 flattened page
+names as the server's `file-dimensions`.)
 
 ## Automated coverage
 
@@ -24,12 +25,12 @@ listed as manual below.
 | --- | --- | --- |
 | A1 | Full archive download to a file, byte count == Content-Length | `spec/asyncfetch_spec.lua` (loopback file) |
 | A2 | Range resume appends the exact remaining bytes | `spec/asyncfetch_spec.lua` |
-| A4 | Page order for flat + nested archives, duplicate basenames, 126-dir style tree; validation against a fileName list | `spec/archive_spec.lua` |
+| A4 | Page order for flat + nested archives, duplicate basenames, pass-through/empty directories, non-image files counted for flatten indexes; validation against a fileName list | `spec/archive_spec.lua` |
 | A5 | Extracted page bytes equal the source bytes (byte-for-byte) | `spec/archive_spec.lua` |
 | A6 | File sink never accumulates the body (returns `body == nil`, writes incrementally); chunked bodies stream to disk | `spec/asyncfetch_spec.lua` |
 | A8 | `pagesBytes` is the real extracted size; usage accounting sums pages + meta + cover + `.part` | `spec/archive_spec.lua`, `spec/store_spec.lua` |
 | A9 | No `meta.json` when extraction/validation fails or is interrupted | `spec/queue_spec.lua` (failures), store contract tests |
-| A10 | Page-order mismatch falls back to per-page (`source = "per-page"`) | `spec/queue_spec.lua` |
+| A10 | Page-order mismatch falls back to per-page (`source = "per-page"`) and is remembered so a retry skips the archive | `spec/queue_spec.lua` |
 | A11 | Multi-file chapters skip the archive and use per-page | `spec/queue_spec.lua` |
 | A12 | HTTP 403 falls back to per-page | queue fallback branch (covered by the same per-page tests; the 403 trigger itself is manual) |
 | A13 | Non-archive extension uses per-page | `spec/queue_spec.lua` (`_needs_per_page`) |

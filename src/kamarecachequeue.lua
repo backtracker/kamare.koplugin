@@ -149,6 +149,55 @@ function Queue:entry_progress(entry)
     return done, total, math.max(0, math.min(1, done / total))
 end
 
+-- A chapter whose archive could not be validated against Kavita's
+-- file-dimensions is remembered, so retrying it goes straight to per-page
+-- instead of downloading the same multi-hundred-MB archive again. Bump the
+-- version when the ordering algorithm changes (old verdicts then expire).
+Queue.ORDER_ALGO_VERSION = 1
+
+function Queue:_order_flag_key(entry)
+    return tostring(entry.serverKey) .. ":" .. tostring(entry.chapterId)
+end
+
+function Queue:_order_flagged(entry)
+    if not self.settings or type(entry) ~= "table" then return false end
+    local flags = self.settings:readSetting("archive_order_mismatch", {})
+    if type(flags) ~= "table" then return false end
+    local flag = flags[self:_order_flag_key(entry)]
+    return type(flag) == "table"
+        and flag.v == self.ORDER_ALGO_VERSION
+        and tonumber(flag.bytes) == tonumber(entry.archiveBytes)
+end
+
+function Queue:_set_order_flag(entry, flagged)
+    if not self.settings or type(entry) ~= "table" then return end
+    local flags = self.settings:readSetting("archive_order_mismatch", {})
+    if type(flags) ~= "table" then flags = {} end
+    local key = self:_order_flag_key(entry)
+    if not flagged then
+        if not flags[key] then return end
+        flags[key] = nil
+    else
+        flags[key] = {
+            v = self.ORDER_ALGO_VERSION,
+            bytes = tonumber(entry.archiveBytes) or 0,
+            at = self.clock(),
+        }
+        local count = 0
+        for __ in pairs(flags) do count = count + 1 end
+        if count > 100 then
+            local oldest_key, oldest_at
+            for k, v in pairs(flags) do
+                local at = tonumber(type(v) == "table" and v.at) or 0
+                if not oldest_at or at < oldest_at then oldest_key, oldest_at = k, at end
+            end
+            if oldest_key then flags[oldest_key] = nil end
+        end
+    end
+    self.settings:saveSetting("archive_order_mismatch", flags)
+    pcall(function() self.settings:flush() end)
+end
+
 -- ---- persistence ---------------------------------------------------------
 
 function Queue:load()
@@ -504,6 +553,7 @@ function Queue:_step()
 end
 
 function Queue:_needs_per_page(entry)
+    if self:_order_flagged(entry) then return true, "known page-order mismatch" end
     if entry.files and #entry.files > 1 then return true, "multi-file chapter" end
     local ext = entry.archiveExt
     if ext and not (ext == "cbz" or ext == "zip" or ext == "cbr" or ext == "cb7") then
@@ -606,10 +656,15 @@ function Queue:_extract_archive(entry)
     })
     if not result then
         -- Page order/count mismatch is almost always an archive shape we could
-        -- not replicate; per-page always works.
+        -- not replicate; per-page always works. Remember it so a retry does not
+        -- re-download a possibly huge archive.
+        if err and (err:find("page order mismatch", 1, true) or err:find("page count", 1, true)) then
+            self:_set_order_flag(entry, true)
+        end
         self:_fallback_per_page(entry, err)
         return
     end
+    self:_set_order_flag(entry, false)
 
     if self.current ~= entry then return end
     local exts = {}

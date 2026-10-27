@@ -48,7 +48,9 @@ return function(t)
     t.eq(page_of(flat, "b.jpg"), 3, "flat b third")
     t.eq(plan_dest_for(flat, "a2.jpg"), "0001.jpg", "flat dest name")
 
-    -- nested plan replicates Kavita Flatten + natural sort
+    -- nested plan replicates Kavita Flatten + natural sort:
+    -- only non-root dirs are renamed; root files keep their names but still
+    -- participate in the final natural sort (so they come after 000_* names).
     local paths = {
         "a10.jpg", "b.jpg", "a2.jpg",
         "d2/001.jpg", "d2/002.jpg",
@@ -59,14 +61,42 @@ return function(t)
     t.is_nil(perr, "nested plan no error")
     t.eq(#plan, 9, "nested plan size")
     local expected = {
-        ["a2.jpg"] = 1, ["a10.jpg"] = 2, ["b.jpg"] = 3,
-        ["d1/001.jpg"] = 4, ["d1/003.jpg"] = 5, ["d1/010.jpg"] = 6,
-        ["d1/deep/x.jpg"] = 7,
-        ["d2/001.jpg"] = 8, ["d2/002.jpg"] = 9,
+        ["d1/001.jpg"] = 1, ["d1/003.jpg"] = 2, ["d1/010.jpg"] = 3,
+        ["d1/deep/x.jpg"] = 4,
+        ["d2/001.jpg"] = 5, ["d2/002.jpg"] = 6,
+        ["a2.jpg"] = 7, ["a10.jpg"] = 8, ["b.jpg"] = 9,
     }
     for path, page in pairs(expected) do
         t.eq(page_of(plan, path), page, "nested page " .. path)
     end
+
+    -- a pass-through directory (only subdirectories) still consumes an index;
+    -- this is the shape that used to break real volumes (Kavita names the
+    -- first chapter folder 001_*, not 002_*).
+    local pt_plan, pt_err, pt_names = Archive.build_plan({
+        "CLAYMORE 17/Ch1/001.jpg", "CLAYMORE 17/Ch1/002.jpg",
+        "CLAYMORE 17/Ch2/001.jpg",
+    })
+    t.is_nil(pt_err, "pass-through plan no error")
+    t.eq(#pt_plan, 3, "pass-through plan size")
+    t.eq(pt_names[1], "001_001.jpg", "pass-through consumes index 0")
+    t.eq(pt_names[2], "001_002.jpg", "second file in first chapter")
+    t.eq(pt_names[3], "002_001.jpg", "second chapter gets index 2")
+
+    -- explicit empty directories also consume an index
+    local empty_plan, empty_err, empty_names = Archive.build_plan(
+        { "Ch1/001.jpg" }, { "AAA-Empty", "Ch1" })
+    t.is_nil(empty_err, "explicit dirs plan no error")
+    t.eq(#empty_plan, 1, "explicit dirs plan size")
+    t.eq(empty_names[1], "001_001.jpg", "empty dir consumes index 0")
+
+    -- non-image files inside a directory are counted for the flatten index
+    local mixed_plan, mixed_err, mixed_names = Archive.build_plan({
+        "d/a.jpg", "d/b.txt", "d/c.jpg",
+    })
+    t.is_nil(mixed_err, "mixed plan no error")
+    t.eq(#mixed_plan, 2, "mixed plan skips non-images")
+    t.eq(mixed_names[2], "000_003.jpg", "fileIndex counts non-images")
 
     -- real archive roundtrip (flat + nested, duplicate basenames)
     local root = t.tmpdir()
@@ -99,11 +129,15 @@ return function(t)
     t.ok(result ~= nil, "extract chapter ok: " .. tostring(xerr))
     if result then
         t.eq(result.pages, 9, "extracted page count")
-        t.eq(read(dest .. "/0001.jpg"), "PAGE-a2", "page 1 bytes")
-        t.eq(read(dest .. "/0002.jpg"), "PAGE-a10", "page 2 bytes")
-        t.eq(read(dest .. "/0004.jpg"), "PAGE-d1-001", "page 4 bytes")
-        t.eq(read(dest .. "/0007.jpg"), "PAGE-deep-x", "page 7 bytes")
-        t.eq(read(dest .. "/0009.jpg"), "PAGE-d2-002", "page 9 bytes")
+        t.eq(read(dest .. "/0001.jpg"), "PAGE-d1-001", "page 1 bytes")
+        t.eq(read(dest .. "/0002.jpg"), "PAGE-d1-003", "page 2 bytes")
+        t.eq(read(dest .. "/0003.jpg"), "PAGE-d1-010", "page 3 bytes")
+        t.eq(read(dest .. "/0004.jpg"), "PAGE-deep-x", "page 4 bytes")
+        t.eq(read(dest .. "/0005.jpg"), "PAGE-d2-001", "page 5 bytes")
+        t.eq(read(dest .. "/0006.jpg"), "PAGE-d2-002", "page 6 bytes")
+        t.eq(read(dest .. "/0007.jpg"), "PAGE-a2", "page 7 bytes")
+        t.eq(read(dest .. "/0008.jpg"), "PAGE-a10", "page 8 bytes")
+        t.eq(read(dest .. "/0009.jpg"), "PAGE-b", "page 9 bytes")
         t.eq(result.pagesBytes, 87, "pages bytes summed")
     end
 

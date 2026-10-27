@@ -2,10 +2,14 @@
 Chapter archive handling: page-order replication, sequential extraction and
 validated downloads.
 
-Kavita derives page order from the archive contents in two steps:
-  1. DirectoryService.Flatten: depth-first walk, files before subdirectories at
-     each level, every file renamed to `{dirIndex:03d}_{fileIndex:03d}{ext}`.
-     Flat archives (no subdirectories) keep their original names.
+Kavita derives page order from the extracted archive in two steps:
+  1. DirectoryService.Flatten (only when the archive has subdirectories):
+     depth-first, and only for **non-root** directories, every file is renamed
+     to `{dirIndex:03d}_{fileIndex:03d}{ext}`. `dirIndex` starts at 0 and is
+     bumped for every non-root directory -- including pass-through directories
+     that contain only subdirectories -- and `fileIndex` counts every file in
+     that directory (metadata/non-image files included). Files at the root keep
+     their original names.
   2. Pages are ordered by natural sort of the file name without extension.
 
 We replicate that ordering locally, then extract the archive **in archive
@@ -33,6 +37,21 @@ local function path_parts(path)
         if part ~= "." and part ~= "" then parts[#parts + 1] = part end
     end
     return parts
+end
+
+local BLACKLISTED_DIRS = {
+    ["__MACOSX"] = true,
+    ["@Recently-Snapshot"] = true,
+    ["@recycle"] = true,
+    [".caltrash"] = true,
+    [".yacreaderlibrary"] = true,
+}
+
+local function has_blacklisted_dir(path)
+    for __, part in ipairs(path_parts(path)) do
+        if BLACKLISTED_DIRS[part] then return true end
+    end
+    return false
 end
 
 local function extension(path)
@@ -102,59 +121,57 @@ function Archive.page_extension(path)
     return extension(path) or "jpg"
 end
 
---- Build the page plan from archive entry paths (in archive order).
---- Returns an array in ARCHIVE ORDER:
----   { path = entry_path, page = 1-based page number, dest_name = "0001.jpg" }
-function Archive.build_plan(entry_paths)
-    if type(entry_paths) ~= "table" then return nil, "no entries" end
+--- Build the page plan, replicating Kavita's page order:
+---   1. `DirectoryService.Flatten`: only *non-root* directories are renamed,
+---      to `{dirIndex:03d}_{fileIndex:03d}{ext}`. `dirIndex` starts at 0 and is
+---      incremented for every non-root directory, including pass-through ones
+---      that only contain subdirectories. `fileIndex` counts every file in the
+---      directory, images or not. Root files keep their original names.
+---   2. Natural sort by file name without extension.
+--- `file_paths` must contain every file entry (non-images included);
+--- `dir_paths` must contain explicit directory entries.
+--- Returns the plan (page order), nil, and a page -> flattened name map.
+function Archive.build_plan(file_paths, dir_paths)
+    if type(file_paths) ~= "table" then return nil, "no entries" end
 
-    local entries = {}
-    local has_dirs = false
-    for _, path in ipairs(entry_paths) do
-        if Archive.is_image_path(path) then
-            local parts = path_parts(path)
-            local item = {
-                path = path,
-                parts = parts,
-                name = parts[#parts],
-            }
-            entries[#entries + 1] = item
-            if #parts > 1 then has_dirs = true end
+    local root = { files = {}, children = {}, child_order = {} }
+    local function ensure_child(node, name)
+        local child = node.children[name]
+        if not child then
+            child = { files = {}, children = {}, child_order = {} }
+            node.children[name] = child
+            node.child_order[#node.child_order + 1] = name
+        end
+        return child
+    end
+    local function insert(path, is_dir)
+        if has_blacklisted_dir(path) then return end
+        local parts = path_parts(path)
+        if #parts == 0 then return end
+        local node = root
+        local last = is_dir and #parts or (#parts - 1)
+        for i = 1, last do node = ensure_child(node, parts[i]) end
+        if not is_dir then
+            node.files[#node.files + 1] = { path = path, name = parts[#parts] }
         end
     end
-    if #entries == 0 then return nil, "no images in archive" end
 
-    local flattened -- { {name=..., path=...} }
-    if not has_dirs then
-        flattened = {}
-        for _, item in ipairs(entries) do
-            flattened[#flattened + 1] = { name = item.name, path = item.path }
-        end
-    else
-        -- Directory tree, preserving insertion independent ordering later.
-        local root = { files = {}, dirs = {}, children = {} }
-        for _, item in ipairs(entries) do
-            local node = root
-            for i = 1, #item.parts - 1 do
-                local dir_name = item.parts[i]
-                if not node.children[dir_name] then
-                    local child = { name = dir_name, files = {}, dirs = {}, children = {} }
-                    node.children[dir_name] = child
-                    node.dirs[#node.dirs + 1] = dir_name
-                end
-                node = node.children[dir_name]
+    for __, path in ipairs(dir_paths or {}) do insert(path, true) end
+    for __, path in ipairs(file_paths) do insert(path, false) end
+
+    local flattened = {}
+    local dir_index = 0
+    local function visit(node, is_root)
+        if is_root then
+            -- Kavita leaves files at the extraction root untouched.
+            for __, f in ipairs(node.files) do
+                flattened[#flattened + 1] = { name = f.name, path = f.path }
             end
-            node.files[#node.files + 1] = item
-        end
-
-        flattened = {}
-        local dir_index = 0
-        local function visit(node)
+        else
             local this_index = dir_index
             dir_index = dir_index + 1
-
             local files = {}
-            for _, f in ipairs(node.files) do files[#files + 1] = f end
+            for __, f in ipairs(node.files) do files[#files + 1] = f end
             table.sort(files, function(a, b)
                 return Archive.natural_compare(a.path, b.path)
             end)
@@ -164,47 +181,48 @@ function Archive.build_plan(entry_paths)
                 if ext then name = name .. "." .. ext end
                 flattened[#flattened + 1] = { name = name, path = f.path }
             end
-
-            table.sort(node.dirs, Archive.natural_compare)
-            for _, dir_name in ipairs(node.dirs) do
-                visit(node.children[dir_name])
-            end
         end
-        visit(root)
-    end
 
-    table.sort(flattened, function(a, b)
+        table.sort(node.child_order, Archive.natural_compare)
+        for __, child_name in ipairs(node.child_order) do
+            visit(node.children[child_name], false)
+        end
+    end
+    visit(root, true)
+
+    local pages = {}
+    for __, item in ipairs(flattened) do
+        if Archive.is_image_path(item.path) then pages[#pages + 1] = item end
+    end
+    if #pages == 0 then return nil, "no images in archive" end
+
+    table.sort(pages, function(a, b)
         return Archive.natural_compare(basename_no_ext(a.name), basename_no_ext(b.name))
     end)
 
-    local page_of_path, name_of_page = {}, {}
-    for page, item in ipairs(flattened) do
-        page_of_path[item.path] = page
+    local plan, name_of_page = {}, {}
+    for page, item in ipairs(pages) do
         name_of_page[page] = item.name
-    end
-
-    local plan = {}
-    for _, item in ipairs(entries) do
-        local page = page_of_path[item.path]
-        if page then
-            plan[#plan + 1] = {
-                path = item.path,
-                page = page,
-                dest_name = string.format("%04d.%s", page, Archive.page_extension(item.path)),
-            }
-        end
+        plan[#plan + 1] = {
+            path = item.path,
+            page = page,
+            dest_name = string.format("%04d.%s", page, Archive.page_extension(item.path)),
+        }
     end
     return plan, nil, name_of_page
 end
 
+--- All file and directory entries in the archive (dirs matter for flattening).
 function Archive.entry_paths(reader)
-    local paths = {}
+    local files, dirs = {}, {}
     for entry in reader:iterate() do
         if entry.mode == "file" then
-            paths[#paths + 1] = entry.path
+            files[#files + 1] = entry.path
+        elseif entry.mode == "directory" then
+            dirs[#dirs + 1] = entry.path
         end
     end
-    return paths
+    return files, dirs
 end
 
 function Archive.open(path)
@@ -297,9 +315,9 @@ end
 function Archive.plan_for_archive(path)
     local reader, err = Archive.open(path)
     if not reader then return nil, nil, err end
-    local paths = Archive.entry_paths(reader)
+    local paths, dirs = Archive.entry_paths(reader)
     reader:close(false)
-    local plan, perr, names = Archive.build_plan(paths)
+    local plan, perr, names = Archive.build_plan(paths, dirs)
     if not plan then return nil, nil, perr end
     return plan, names
 end
@@ -317,7 +335,11 @@ end
 --- Compare Kavita's file-dimensions fileName list with our page order.
 --- Returns true when identical (ignoring directory prefixes/extension case).
 function Archive.names_match(plan, dims_names, name_of_page)
-    if type(dims_names) ~= "table" or #dims_names ~= #plan then return false end
+    if type(dims_names) ~= "table" or #dims_names ~= #plan then
+        logger.warn("[kamare:archive] page count mismatch: ours", #plan,
+            "kavita", type(dims_names) == "table" and #dims_names or 0)
+        return false
+    end
     for i = 1, #plan do
         local expected = normalize_page_name(name_of_page and name_of_page[i] or plan[i].dest_name)
         local actual = normalize_page_name(dims_names[i])
@@ -326,6 +348,9 @@ function Archive.names_match(plan, dims_names, name_of_page)
             local page_num = tostring(plan[i].page)
             local actual_num = actual and actual:match("(%d+)%s*$")
             if not (actual_num and tonumber(actual_num) == tonumber(page_num)) then
+                logger.warn("[kamare:archive] page order mismatch at page", i,
+                    "ours:", tostring(expected), "kavita:", tostring(actual),
+                    "entry:", tostring(plan[i].path))
                 return false
             end
         end
@@ -341,8 +366,8 @@ function Archive.extract_chapter(opts)
     local reader, err = Archive.open(path)
     if not reader then return nil, err end
 
-    local entry_paths = Archive.entry_paths(reader)
-    local plan, perr, name_of_page = Archive.build_plan(entry_paths)
+    local entry_paths, dir_paths = Archive.entry_paths(reader)
+    local plan, perr, name_of_page = Archive.build_plan(entry_paths, dir_paths)
     if not plan then
         reader:close(false)
         return nil, perr
