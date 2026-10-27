@@ -610,21 +610,27 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
         return
     end
     local store = self:_store()
-    local total = 0
-    for __, e in ipairs(entries) do total = total + (tonumber(e.archiveBytes) or 0) * 2.05 end
+    local peak_factor = self:_queue().PEAK_FACTOR or 2.05
+    local download_bytes, peak_bytes = 0, 0
+    for __, e in ipairs(entries) do
+        local bytes = tonumber(e.archiveBytes) or 0
+        download_bytes = download_bytes + bytes
+        peak_bytes = peak_bytes + bytes * peak_factor
+    end
     local free = store:free_bytes()
-    if free and total > free then
+    if free and peak_bytes > free then
         UIManager:show(InfoMessage:new{
-            text = T(_("Not enough space: need about %1, %2 available"),
-                format_bytes(total), format_bytes(free)),
+            text = T(_("Not enough space to unpack: peak need about %1, %2 available"),
+                format_bytes(peak_bytes), format_bytes(free)),
         })
         return
     end
 
     local dialog
     dialog = ConfirmBox:new{
-        text = T(_("Cache %1 chapter(s), about %2 (%3 available)?"),
-            #entries, format_bytes(total), format_bytes(free or 0)),
+        text = T(_("Cache %1 chapter(s)? Download about %2; unpacking peaks at %3, final size about %2 (%4 available)"),
+            #entries, format_bytes(download_bytes), format_bytes(peak_bytes),
+            format_bytes(free or 0)),
         ok_text = _("Download"),
         ok_callback = function()
             UIManager:close(dialog)

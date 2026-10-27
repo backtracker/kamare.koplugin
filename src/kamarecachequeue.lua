@@ -315,7 +315,7 @@ function Queue:enqueue(entries, opts)
 
     local available = self.store:free_bytes()
     if available and total > available then
-        return nil, string.format(_("Not enough space: need %.0f MB, %.0f MB available"),
+        return nil, string.format(_("Not enough space: unpack peak needs %.0f MB, %.0f MB available"),
             total / (1024 * 1024), available / (1024 * 1024))
     end
     if available and available < self.LOW_WATER_BYTES then
