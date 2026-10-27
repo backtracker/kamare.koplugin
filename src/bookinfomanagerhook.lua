@@ -9,6 +9,25 @@ local util = require("util")
 
 local BookInfoManagerHook = {}
 
+-- Virtual items rendered by CoverBrowser need their title/authors supplied:
+-- BookInfoManager returns an `ignore_meta = "Y"` stub for unknown extensions
+-- (.kavita/.kamare), and CoverBrowser then renders the file name ("17878.kamare")
+-- and never looks at item.author. The browser registers the strings it builds.
+local virtual_info = {}
+
+function BookInfoManagerHook.setVirtualInfo(filepath, info)
+    if type(filepath) ~= "string" then return end
+    if info then
+        virtual_info[filepath] = info
+    else
+        virtual_info[filepath] = nil
+    end
+end
+
+function BookInfoManagerHook.clearVirtualInfo()
+    virtual_info = {}
+end
+
 -- Original functions (saved when hook is installed)
 local original_getBookInfo = nil
 local original_getDocProps = nil
@@ -241,15 +260,25 @@ end
 
 -- Overridden getBookInfo function
 local function hooked_getBookInfo(self, filepath, do_cover_image)
-    -- Check if this is a Kavita path
-    if isKavitaPath(filepath) then
-        -- Now that we've registered .kavita with DocumentRegistry, the original
-        -- getBookInfo() will pass the hasProvider() check and query the database normally
-        return original_getBookInfo(self, filepath, do_cover_image)
+    local info = original_getBookInfo(self, filepath, do_cover_image)
+    local virtual = virtual_info[filepath]
+    if virtual then
+        if type(info) ~= "table" then
+            info = {
+                filesize = 0,
+                filemtime = os.time(),
+                in_progress = 0,
+                cover_fetched = "Y",
+            }
+        end
+        -- Make CoverBrowser use these strings instead of the file name, and
+        -- hide the synthetic ".kavita"/".kamare" extension on the right.
+        info.ignore_meta = false
+        info._no_provider = true
+        if virtual.title then info.title = virtual.title end
+        if virtual.author then info.authors = virtual.author end
     end
-
-    -- Not a Kavita path - use original implementation
-    return original_getBookInfo(self, filepath, do_cover_image)
+    return info
 end
 
 -- Overridden extractBookInfo function

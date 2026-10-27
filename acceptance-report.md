@@ -59,13 +59,18 @@ names as the server's `file-dimensions`.)
 
 ## Manual / device-only checks remaining
 
-These need a real Kavita `0.9.1.4` server and/or real e-ink hardware, and were not run here
-because no credentials are configured on this machine:
+These need a real Kavita `0.9.1.4` server and/or real e-ink hardware. Page order and the
+cache UI were checked read-only against the running server and by driving the real KOReader
+emulator with a scripted plugin (shelf → series → volume rows in the three CoverBrowser
+display modes); they still need a human pass on device:
 
 - A3 (630 MB chapter reset + retry), A6 measured RSS on device, A12 real 403 key.
 - B1 (offline entry never opens the Wi-Fi dialog), B2/B3/B4 (shelf contents, greyed rows,
   zero-request open), B7 (dual page / crop offline), B8/B9 (offline next chapter), B10 empty
   state, B12 row text on device.
+  * B12 was verified in the emulator: shelf shows `大剑`; the series list shows
+    `CLAYMORE (17) · Cached` (no `10634.kamare` / `17878.kamare`) in `list_image_meta`,
+    `mosaic_image` and `list_image_filename` modes.
 - C1/C5/C7/C11 (real reconnect activity, 1-page session residue, kill -9 window, trigger points).
 - D2/D3 (row disabled while open; the white-page counter-example), D5 (full-series prompt),
   D7 (orphan group after deleting a server), D8 (warning text), D10/D11 (real fingerprint

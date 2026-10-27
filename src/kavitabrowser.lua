@@ -17,6 +17,7 @@ local KamareImageViewer = require("kamareimageviewer")
 local _ = require("gettext")
 local Utils = require("kamareutils")
 local CacheUtil = require("kamarecacheutil")
+local BookInfoManagerHook = require("bookinfomanagerhook")
 local T = ffiUtil.template
 
 -- Progress indicator for read status
@@ -131,6 +132,20 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
     -- Wrap updateItems to force recalculation when page_num is wrong
     local original_updateItems = self.CoverMenu.updateItems
     self.updateItems = function(cover_menu_self, select_number, no_recalculate_dimen)
+        -- CoverBrowser reads titles/authors from BookInfoManager, so feed it
+        -- the strings this menu built (cache rows and statuses included).
+        for __, item in ipairs(cover_menu_self.item_table or {}) do
+            local file = item.file
+            if file and (file:match("^/kavita/") or file:match("^/kamare/")) then
+                -- CoverBrowser concatenates mandatory without nil checks once
+                -- a bookinfo row exists.
+                if item.mandatory == nil then item.mandatory = "" end
+                BookInfoManagerHook.setVirtualInfo(file, {
+                    title = item.text,
+                    author = item.author,
+                })
+            end
+        end
         -- Force recalculation if page_num doesn't match expected value
         if cover_menu_self.item_table and #cover_menu_self.item_table > 0 and cover_menu_self.perpage and cover_menu_self.perpage > 0 then
             local expected_page_num = math.ceil(#cover_menu_self.item_table / cover_menu_self.perpage)
@@ -1993,7 +2008,7 @@ function KavitaBrowser:buildKavitaSeriesItems(series_list)
             local item = {
                 text = name,
                 author = "",  -- Empty - SeriesDto doesn't have author fields
-                mandatory = self.has_coverbrowser and nil or (mandatory or ""),
+                mandatory = self.has_coverbrowser and "" or (mandatory or ""),
                 kavita_series = true,
                 series = s, -- keep full dto for next steps
             }
@@ -2025,7 +2040,7 @@ function KavitaBrowser:buildKavitaVolumeItems(volumes)
             local item = {
                 text = name,
                 author = subtitle,
-                mandatory = self.has_coverbrowser and nil or mandatory,
+                mandatory = self.has_coverbrowser and "" or mandatory,
                 kavita_volume = true,
                 volume = v,
             }
@@ -2064,7 +2079,7 @@ function KavitaBrowser:buildKavitaChapterItems(chapters, kind)
             local item = {
                 text = name,
                 author = subtitle,
-                mandatory = self.has_coverbrowser and nil or mandatory,
+                mandatory = self.has_coverbrowser and "" or mandatory,
                 kavita_chapter = true,
                 chapter = c,
                 is_special = (kind == "special") or nil,
@@ -2357,7 +2372,7 @@ function KavitaBrowser:buildKavitaReadingListItems(lists)
             local item = {
                 text = title,
                 author = subtitle,
-                mandatory = self.has_coverbrowser and nil or (rl.itemCount and tostring(rl.itemCount) or ""),
+                mandatory = self.has_coverbrowser and "" or (rl.itemCount and tostring(rl.itemCount) or ""),
                 kavita_reading_list = true,
                 reading_list = rl,
             }
@@ -2496,7 +2511,7 @@ function KavitaBrowser:buildKavitaReadingListItemItems(rli_items)
             local item = {
                 text = series_name .. " — " .. chapter_label,
                 author = subtitle,
-                mandatory = self.has_coverbrowser and nil or mandatory,
+                mandatory = self.has_coverbrowser and "" or mandatory,
                 kavita_chapter = true,
                 chapter = synthetic_chapter,
                 is_special = ch.isSpecial or nil,
