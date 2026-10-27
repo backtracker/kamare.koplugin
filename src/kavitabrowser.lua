@@ -847,36 +847,42 @@ function KavitaBrowser:_shelfSubtitle()
     if self.offline then
         local simulated = self.kamare_settings
             and self.kamare_settings:readSetting("force_offline", false)
-        parts[#parts + 1] = simulated and _("Simulated offline: cached series only")
-            or _("Offline: showing cached series only")
+        parts[#parts + 1] = simulated and _("Simulated offline") or _("Offline mode")
     end
     local usage = self:_cachedUsage(store, active)
-    if usage.chapters > 0 then
-        parts[#parts + 1] = T(_("Used %1 · %2 free"),
-            format_bytes(usage.used), format_bytes(store:free_bytes() or 0))
-    end
-    if status.pending_count and status.pending_count > 0 and queue:is_paused()
-        and status.pause_reason ~= "restored" then
+    local free_text = T(_("Free %1"), format_bytes(store:free_bytes() or 0))
+    local paused = status.pending_count and status.pending_count > 0
+        and queue:is_paused() and status.pause_reason ~= "restored"
+    if paused then
         local reason_text = {
             wifi = _("Paused · waiting for Wi-Fi"),
             offline = _("Paused · offline"),
             low_space = _("Paused · not enough disk space"),
             network = _("Paused · network errors"),
         }
-        parts[#parts + 1] = reason_text[status.pause_reason] or _("Downloads paused")
+        parts[#parts + 1] = (reason_text[status.pause_reason] or _("Downloads paused"))
+            .. " · " .. free_text
     elseif status.state == "extracting" then
-        parts[#parts + 1] = _("Extracting…")
+        parts[#parts + 1] = _("Extracting…") .. " · " .. free_text
     elseif status.state == "downloading" then
         local pct = math.floor((status.percent or 0) * 100 + 0.5)
-        parts[#parts + 1] = T(_("Downloading %1 / %2 · %3/%4"),
-            format_bytes(status.bytes_done), format_bytes(status.bytes_total),
-            status.index, status.total) .. string.format(" · %d%%", pct)
+        parts[#parts + 1] = T(_("Downloading %1 · %2/%3"),
+            string.format("%d%%", pct),
+            format_bytes(status.bytes_done), format_bytes(status.bytes_total))
+            .. " · " .. free_text
+    elseif usage.chapters > 0 then
+        parts[#parts + 1] = T(_("Used %1 · %2 free"),
+            format_bytes(usage.used), format_bytes(store:free_bytes() or 0))
+    else
+        parts[#parts + 1] = free_text
     end
     local pending = journal:pending_count()
-    if pending > 0 then parts[#parts + 1] = T(_("%1 pending sync"), pending) end
+    if pending > 0 and not active and not paused then
+        parts[#parts + 1] = T(_("%1 pending sync"), pending)
+    end
     local seconds = journal:session_seconds()
-    if seconds > 0 then
-        parts[#parts + 1] = T(_("Offline reading %1 (not counted by Kavita)"), format_duration(seconds))
+    if self.offline and seconds >= 60 then
+        parts[#parts + 1] = T(_("Offline reading %1"), format_duration(seconds))
     end
     return table.concat(parts, " · ")
 end

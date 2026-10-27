@@ -744,8 +744,11 @@ msgstr "下载队列已继续"
 msgid "Download volume"
 msgstr "缓存本卷"
 
-msgid "Downloading %1 / %2 · %3/%4"
-msgstr "下载中 %1 / %2 · 第 %3/%4 个"
+msgid "Downloading %1 · %2/%3"
+msgstr "下载中 %1 · %2/%3"
+
+msgid "Free %1"
+msgstr "可用 %1"
 
 msgid "Downloading…"
 msgstr "下载中…"
@@ -837,8 +840,8 @@ msgstr "卷数"
 msgid "OK"
 msgstr "确定"
 
-msgid "Offline reading %1 (not counted by Kavita)"
-msgstr "离线阅读 %1（未计入 Kavita 统计）"
+msgid "Offline reading %1"
+msgstr "离线阅读 %1"
 
 msgid "Offline · progress will sync after reconnecting"
 msgstr "离线 · 恢复联网后会同步进度"
@@ -968,5 +971,8 @@ msgstr "模拟离线（调试）"
 msgid "Stop simulating offline"
 msgstr "停止模拟离线"
 
-msgid "Simulated offline: cached series only"
-msgstr "模拟离线：仅显示已缓存系列"
+msgid "Simulated offline"
+msgstr "模拟离线"
+
+msgid "Offline mode"
+msgstr "离线模式"
