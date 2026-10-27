@@ -468,17 +468,9 @@ function AsyncFetch.fetch(req_table, opts, on_done)
                 if k then hs[k:lower()] = v end
             end
             headers = hs
-            -- carry any body bytes that arrived with the head
+            -- Carry any body bytes that arrived with the head. They are fed
+            -- after the body mode (and possible chunked decoder) is known.
             local body_start = head_buf:sub(head_end + 4)
-            if #body_start > 0 then
-                if opts.sink_path then
-                    sink_feed(body_start)
-                else
-                    body_chunks[#body_chunks + 1] = body_start
-                    received = #body_start
-                end
-                if first_chunk_ms == nil then first_chunk_ms = time.to_ms(time.now() - t_start) end
-            end
             -- redirect handling
             if code >= 300 and code < 400 and headers["location"] then
                 redirect_count = redirect_count + 1
@@ -513,6 +505,15 @@ function AsyncFetch.fetch(req_table, opts, on_done)
                 chunk_decoder = {
                     phase = "size", buf = "", remaining = 0, done = false, err = nil,
                 }
+            end
+            if #body_start > 0 then
+                if opts.sink_path then
+                    sink_feed(body_start)
+                else
+                    body_chunks[#body_chunks + 1] = body_start
+                    received = #body_start
+                end
+                if first_chunk_ms == nil then first_chunk_ms = time.to_ms(time.now() - t_start) end
             end
             logger.dbg(string.format(
                 "[kamare:asyncfetch] response code=%s content-length=%s mode=%s",

@@ -713,6 +713,21 @@ function KavitaClient:streamChapter(chapter_id)
     return page_table
 end
 
+-- Read the current reading progress for a chapter.
+-- GET /api/Reader/get-progress?chapterId={id}
+-- Returns ProgressDto table, code, headers, status, body.
+function KavitaClient:getReaderProgress(chapter_id)
+    if not chapter_id then
+        logger.warn("KavitaClient:getReaderProgress: chapter_id is required")
+        return nil, -1, nil, "chapterId required", nil
+    end
+    local data, code, headers, status, body = self:apiJSON("/api/Reader/get-progress", {
+        method = "GET",
+        query  = { chapterId = chapter_id },
+    })
+    return data, code, headers, status, body
+end
+
 -- Save page progress for authenticated user: POST /api/Reader/progress
 -- progress = { volumeId, chapterId, pageNum, seriesId, libraryId, bookScrollId?, lastModifiedUtc? }
 function KavitaClient:postReaderProgress(progress)
