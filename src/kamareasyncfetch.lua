@@ -27,15 +27,22 @@ Driven by: the prefetch chain (background fill) and the render path
 also the async progress-POST path in the viewer.
 --]]
 
-local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local socket = require("socket")
 local ssl = require("ssl")
-local socketutil = require("socketutil")
 local time = require("ui/time")
 local url = require("socket.url")
 
 local AsyncFetch = {}
+
+-- Number of page-image requests currently in flight. The download queue reads
+-- this to yield background chapter downloads while the reader is waiting for
+-- pages (spec 03 A3).
+local page_requests_inflight = 0
+
+function AsyncFetch.page_requests_inflight()
+    return page_requests_inflight
+end
 
 local TLS_PARAMS = {
     protocol = "any",
@@ -124,8 +131,18 @@ end
 function AsyncFetch.fetch(req_table, opts, on_done)
     opts = opts or {}
     local quantum_ms    = opts.quantum_ms or QUANTUM_MS_DEFAULT
-    local total_timeout = opts.total_timeout or socketutil.FILE_TOTAL_TIMEOUT
+    local total_timeout = opts.total_timeout
+    if not total_timeout then
+        local ok, socketutil = pcall(require, "socketutil")
+        total_timeout = (ok and socketutil.FILE_TOTAL_TIMEOUT) or 60
+    end
     local t_start       = time.now()
+    -- Resolved lazily so data-layer tests can load this module (and inject a
+    -- fake scheduler) without booting the KOReader UI stack.
+    local scheduler     = opts.scheduler or require("ui/uimanager")
+    local count_priority = (opts.priority == "page")
+    if count_priority then page_requests_inflight = page_requests_inflight + 1 end
+    local priority_released = false
 
     local method     = req_table.method or "GET"
     local req_headers = req_table.headers or {}
@@ -140,24 +157,138 @@ function AsyncFetch.fetch(req_table, opts, on_done)
     local content_length, body_mode = nil, "close" -- "length" | "chunked" | "close"
     local body_chunks, received = {}, 0
     local body_tail = "" -- last few raw bytes, for chunked terminator detection
+
+    local cancelled = false
+    local result_err = nil
+    local fail  -- assigned below; forward-declared for the sink helpers
+
+    -- Optional file sink: stream bytes to disk instead of accumulating them.
+    -- `received` then counts payload bytes written, which keeps the existing
+    -- Content-Length accounting intact.
+    local sink_file, sink_error
+    local chunk_decoder = nil
+    if opts.sink_path then
+        local path = opts.sink_path
+        local offset = opts.sink_offset
+        local mode = "wb"
+        if opts.sink_mode == "append" or offset then
+            mode = "r+b"
+        end
+        local f = io.open(path, mode)
+        if not f and mode == "r+b" then
+            f = io.open(path, "wb")
+        end
+        if not f then
+            sink_error = "sink open failed: " .. tostring(path)
+        else
+            if offset and offset > 0 then
+                f:seek("set", offset)
+                if not req_headers["Range"] then
+                    req_headers["Range"] = "bytes=" .. offset .. "-"
+                end
+            elseif opts.sink_mode == "append" then
+                f:seek("end")
+            end
+            sink_file = f
+        end
+    end
+
+    local function sink_write(data)
+        if not sink_file or #data == 0 then return end
+        local ok, err = sink_file:write(data)
+        if not ok then
+            sink_error = "sink write failed: " .. tostring(err)
+            fail(sink_error)
+            return
+        end
+        received = received + #data
+    end
+
+    -- Incremental chunked decoder used only with a file sink. Payload bytes go
+    -- straight to disk; no 160 MB string ever exists in memory.
+    local function sink_feed_chunked(data)
+        local d = chunk_decoder
+        d.buf = d.buf .. data
+        while true do
+            if d.phase == "size" then
+                local e = d.buf:find("\r\n", 1, true)
+                if not e then break end
+                local line = d.buf:sub(1, e - 1):gsub(";.*$", "")
+                local size = tonumber(line, 16)
+                if not size then d.err = "chunk: bad size '" .. line .. "'"; break end
+                d.buf = d.buf:sub(e + 2)
+                if size == 0 then
+                    d.phase = "trailer"
+                else
+                    d.phase, d.remaining = "data", size
+                end
+            elseif d.phase == "data" then
+                if #d.buf == 0 then break end
+                local take = math.min(d.remaining, #d.buf)
+                sink_write(d.buf:sub(1, take))
+                if sink_error then break end
+                d.buf = d.buf:sub(take + 1)
+                d.remaining = d.remaining - take
+                if d.remaining == 0 then d.phase = "crlf" end
+            elseif d.phase == "crlf" then
+                if #d.buf < 2 then break end
+                if d.buf:sub(1, 2) ~= "\r\n" then d.err = "chunk: missing CRLF"; break end
+                d.buf = d.buf:sub(3)
+                d.phase = "size"
+            elseif d.phase == "trailer" then
+                if d.buf:sub(1, 2) == "\r\n" then
+                    d.done = true; d.buf = ""
+                else
+                    local e = d.buf:find("\r\n\r\n", 1, true)
+                    if e then d.done = true; d.buf = "" end
+                end
+                break
+            else
+                break
+            end
+        end
+        if d.err then fail(d.err) end
+    end
+
+    local function sink_feed(data)
+        if chunk_decoder then
+            sink_feed_chunked(data)
+        else
+            sink_write(data)
+        end
+    end
     local body_predecoded = false  -- true once chunked fast-path verified the terminator
     local predecoded_body          -- the verified decoded body when body_predecoded is true
     local redirect_count = 0
     local ticks, recv_max_ms = 0, 0
+    local paused_now = false
     local first_chunk_ms, handshake_ms = nil, nil
-    local cancelled = false
-    local result_err = nil
 
-    local function fail(err)
+    fail = function(err)
         result_err = err
         phase = "done"
     end
+    if sink_error then fail(sink_error) end
 
     local function finalize()
         if sock then pcall(function() sock:close() end); sock = nil end
+        if sink_file then
+            pcall(function() sink_file:flush() end)
+            pcall(function() sink_file:close() end)
+            sink_file = nil
+            if not result_err and chunk_decoder and not chunk_decoder.done then
+                result_err = "chunked body truncated"
+            end
+        end
+        if count_priority and not priority_released then
+            priority_released = true
+            page_requests_inflight = math.max(0, page_requests_inflight - 1)
+        end
         local total_ms = time.to_ms(time.now() - t_start)
         local body
-        if body_predecoded then
+        if sink_file or opts.sink_path then
+            body = nil
+        elseif body_predecoded then
             -- Chunked body was already verified+decoded by the fast-path in
             -- do_body(); use it directly and skip the at-end decode below.
             body = predecoded_body
@@ -340,8 +471,12 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             -- carry any body bytes that arrived with the head
             local body_start = head_buf:sub(head_end + 4)
             if #body_start > 0 then
-                body_chunks[#body_chunks + 1] = body_start
-                received = #body_start
+                if opts.sink_path then
+                    sink_feed(body_start)
+                else
+                    body_chunks[#body_chunks + 1] = body_start
+                    received = #body_start
+                end
                 if first_chunk_ms == nil then first_chunk_ms = time.to_ms(time.now() - t_start) end
             end
             -- redirect handling
@@ -374,6 +509,11 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             else
                 body_mode = "close"
             end
+            if opts.sink_path and body_mode == "chunked" and not chunk_decoder then
+                chunk_decoder = {
+                    phase = "size", buf = "", remaining = 0, done = false, err = nil,
+                }
+            end
             logger.dbg(string.format(
                 "[kamare:asyncfetch] response code=%s content-length=%s mode=%s",
                 tostring(code), tostring(content_length), body_mode))
@@ -398,6 +538,10 @@ function AsyncFetch.fetch(req_table, opts, on_done)
     end
 
     local function do_body()
+        if opts.pause_when and opts.pause_when() then
+            paused_now = true
+            return false
+        end
         local want
         if body_mode == "length" then
             want = math.min(BODY_BUFSIZE, content_length - received)
@@ -411,8 +555,13 @@ function AsyncFetch.fetch(req_table, opts, on_done)
         local got = chunk or partial
         if got and #got > 0 then
             if first_chunk_ms == nil then first_chunk_ms = time.to_ms(time.now() - t_start) end
-            body_chunks[#body_chunks + 1] = got
-            received = received + #got
+            if opts.sink_path then
+                sink_feed(got)
+                if sink_error then return true end
+            else
+                body_chunks[#body_chunks + 1] = got
+                received = received + #got
+            end
             body_tail = (body_tail .. got):sub(-8)
             -- Chunked fast-path: the body *may* have ended with the zero-size
             -- chunk marker "0\r\n\r\n" (no trailers). Verify by actually decoding
@@ -420,7 +569,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             -- bytes mid-stream and trigger a false positive. On a successful
             -- decode we're truly done; on failure it was a false positive, so
             -- keep reading and let Connection: close finish the body.
-            if body_mode == "chunked" and body_tail:sub(-5) == "0\r\n\r\n" then
+            if not opts.sink_path and body_mode == "chunked" and body_tail:sub(-5) == "0\r\n\r\n" then
                 local decoded = decode_chunked(table.concat(body_chunks))
                 if decoded then
                     predecoded_body = decoded
@@ -437,6 +586,9 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             if body_mode == "length" then
                 if received == content_length then phase = "done"
                 else fail("body truncated: " .. received .. "/" .. content_length) end
+            elseif opts.sink_path and body_mode == "chunked" then
+                if chunk_decoder and chunk_decoder.done then phase = "done"
+                else fail("chunked body truncated") end
             else
                 phase = "done" -- chunked/close: decode-at-end (chunked) or as-is (close)
             end
@@ -461,6 +613,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             fail("total timeout"); finalize(); return
         end
         local q_start = time.now()
+        paused_now = false
         while true do
             ticks = ticks + 1
             local advanced
@@ -475,7 +628,9 @@ function AsyncFetch.fetch(req_table, opts, on_done)
             if time.to_ms(time.now() - q_start) >= quantum_ms then break end
         end
         if not cancelled and phase ~= "done" and not result_err then
-            UIManager:scheduleIn(PUMP_RESCHEDULE_S, step)
+            -- Background download yield: one chunk boundary while a page
+            -- request is in flight, then come back later.
+            scheduler:scheduleIn(paused_now and 0.25 or PUMP_RESCHEDULE_S, step)
         end
     end
 
@@ -484,7 +639,7 @@ function AsyncFetch.fetch(req_table, opts, on_done)
     if phase == "done" or result_err then
         finalize()
     else
-        UIManager:scheduleIn(PUMP_RESCHEDULE_S, step)
+        scheduler:scheduleIn(PUMP_RESCHEDULE_S, step)
     end
 
     return {

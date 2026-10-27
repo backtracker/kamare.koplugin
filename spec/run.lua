@@ -93,6 +93,7 @@ function t.tmpdir()
     return make_tmpdir()
 end
 t.tmp_root = tmp_root
+t.spec_dir = runner_dir
 
 local filter = arg and arg[1]
 local specs = {}
