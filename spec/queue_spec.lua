@@ -67,6 +67,7 @@ local function fake_archive(opts)
     opts = opts or {}
     local a = { download_calls = 0, extract_calls = 0, part_sizes = {} }
     local fail_remaining = opts.fail_times or 0
+    local park_remaining = opts.park_times or 0
     function a.download_to_part(o, cb)
         a.download_calls = a.download_calls + 1
         a.part_sizes[#a.part_sizes + 1] = o.store:file_size(o.part_path)
@@ -86,6 +87,10 @@ local function fake_archive(opts)
         local f = io.open(o.part_path, "wb")
         f:write(string.rep("x", o.archive_bytes or 1000))
         f:close()
+        if park_remaining > 0 then
+            park_remaining = park_remaining - 1
+            return { cancel = function() a.cancelled = true end }
+        end
         if opts.park then
             return { cancel = function() a.cancelled = true end }
         end
@@ -490,5 +495,100 @@ return function(t)
         t.eq(meta and meta.source, "per-page", "multi-file uses per-page")
         t.eq(arch.download_calls, 0, "no archive download for multi-file")
         t.eq(q.fetch.calls, 3, "per-page pages fetched")
+    end
+
+    -- deleting the entry being downloaded schedules the next one, so the queue
+    -- cannot be stranded in "downloading" with no current (07 A4).
+    do
+        local q, store, _, scheduler = make(t, { archive = fake_archive({ park_times = 1 }) })
+        q:enqueue({ entry({ chapterId = 100 }), entry({ chapterId = 101 }) })
+        scheduler:pump()
+        t.eq(q.current and q.current.chapterId, 100, "first chapter is current")
+        t.eq(q.state, "downloading", "queue downloads before the delete")
+        t.ok(q:abort("srv1", 100), "abort of the current entry succeeds")
+        t.eq(q.state, "queued", "cancelling the current entry requeues the pump")
+        t.eq(#q.entries, 1, "only the next entry is left")
+        scheduler:pump()
+        t.ok(store:has_meta("srv1", 20, 101), "the next chapter downloads")
+        t.eq(q.state, "idle", "queue goes idle when drained")
+        t.is_nil(q.current, "no current entry after draining")
+    end
+
+    -- deleting the only entry goes idle immediately
+    do
+        local q, _, _, scheduler = make(t, { archive = fake_archive({ park_times = 1 }) })
+        q:enqueue({ entry() })
+        scheduler:pump()
+        t.eq(q.state, "downloading", "single chapter downloading")
+        q:abort("srv1", 100)
+        t.eq(q.state, "idle", "deleting the last entry goes idle")
+        t.is_nil(q.current, "no current after deleting the only entry")
+        t.eq(#q.entries, 0, "queue empty after deleting the only entry")
+    end
+
+    -- pause then resume continues the batch
+    do
+        local q, store, _, scheduler = make(t, { archive = fake_archive({ park_times = 1 }) })
+        q:enqueue({ entry() })
+        scheduler:pump()
+        q:pause("user")
+        t.eq(q.pause_reason, "user", "manual pause reason")
+        t.eq(q.state, "paused", "manual pause state")
+        t.eq(q.entries[1].state, "queued", "paused chapter returns to queued")
+        q:resume()
+        t.ok(not q:is_paused(), "resume clears the pause")
+        scheduler:pump()
+        t.ok(store:has_meta("srv1", 20, 100), "resume finishes the paused chapter")
+    end
+
+    -- a restored queue stays paused until the user resumes it
+    do
+        local q, _, settings = make(t)
+        q:enqueue({ entry() })
+        local q2 = Queue:new{
+            store = q.store, settings = settings, client = q.client,
+            scheduler = fake_scheduler(), archive = q.archive, fetch = q.fetch,
+            clock = function() return 2000 end,
+        }
+        q2:load()
+        t.ok(q2:is_paused(), "restored queue is paused")
+        t.eq(q2.pause_reason, "restored", "restored pause reason")
+        t.eq(q2.state, "paused", "restored state is paused")
+        q2:resume()
+        t.ok(not q2:is_paused(), "manual resume clears the restored pause")
+        q2.scheduler:pump()
+        t.eq(#q2.entries, 0, "manual resume continues the restored queue")
+    end
+
+    -- network pause: retry revives a failed entry, resets the failure counter
+    -- and resumes the batch
+    do
+        local arch = fake_archive({ fail_times = 100 })
+        local q, _, _, scheduler = make(t, { archive = arch })
+        q:enqueue({ entry({ chapterId = 1 }), entry({ chapterId = 2 }), entry({ chapterId = 3 }) })
+        scheduler:pump()
+        t.ok(q:is_paused(), "batch paused after consecutive failures")
+        t.eq(q.pause_reason, "network", "network pause reason")
+        t.eq(#q.entries, 3, "failed entries kept for retry")
+        t.ok(q:retry("srv1", 1), "retry of a failed entry")
+        t.eq(q.consecutive_failures, 0, "retry resets consecutive failures")
+        t.ok(not q:is_paused(), "retry resumes the batch")
+        t.eq(q.entries[1].state, "queued", "retried entry is queued again")
+    end
+
+    -- low space: resuming must not revive the download
+    do
+        local free = { 10 * 1024 * 1024 * 1024 }
+        local q, _, _, scheduler = make(t)
+        q.store.free_bytes = function() return free[1] end
+        q:enqueue({ entry() })
+        free[1] = 100 * 1024 * 1024
+        scheduler:pump()
+        t.eq(q.pause_reason, "low_space", "paused on low space")
+        q:resume()
+        scheduler:pump()
+        t.ok(q:is_paused(), "resume does not revive a low-space pause")
+        t.eq(q.pause_reason, "low_space", "still low space after resume")
+        t.eq(q.entries[1].attempts, 0, "the chapter was never attempted")
     end
 end

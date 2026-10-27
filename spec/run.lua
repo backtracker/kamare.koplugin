@@ -107,6 +107,9 @@ table.sort(specs)
 io.write(string.format("Kamare specs (%d file(s))\n", #specs))
 for _, name in ipairs(specs) do
     io.write("== ", name, "\n")
+    -- Fake-green guard (spec 08 A7.1): a spec file that runs to completion
+    -- without recording a single assertion proves nothing, so it fails.
+    local before = results.passed + results.failed
     local chunk, err = loadfile(runner_dir .. "/" .. name)
     if not chunk then
         record(false, name .. ": " .. tostring(err))
@@ -120,6 +123,9 @@ for _, name in ipairs(specs) do
                 record(false, name .. " raised: " .. tostring(serr))
             end
         end
+    end
+    if results.passed + results.failed == before then
+        record(false, name .. ": no assertions recorded (fake-green guard)")
     end
 end
 
