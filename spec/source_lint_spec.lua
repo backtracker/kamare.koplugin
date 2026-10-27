@@ -11,6 +11,17 @@ local function read(path)
     return data
 end
 
+local function check_methods(t, source, class, allowed, label)
+    local defined = {}
+    for name in source:gmatch("function " .. class .. ":([%w_]+)") do defined[name] = true end
+    for name in source:gmatch("self%.([%w_]+)%s*=%s*function") do defined[name] = true end
+    for name in source:gmatch("self:([%w_]+)%s*%(") do
+        if not defined[name] and not allowed[name] then
+            t.fail(label .. ": self:" .. name .. "() is not defined on " .. class)
+        end
+    end
+end
+
 return function(t)
     local src = t.spec_dir .. "/../src"
     local checked = 0
@@ -29,4 +40,15 @@ return function(t)
         end
     end
     t.ok(checked > 0, "lint checked gettext-using files")
+
+    -- Method-name typos in the two big UI classes (a snake_case slip shipped
+    -- once and crashed the chapter long-press menu). Menu/Widget methods are
+    -- inherited, so allow the few that are actually used.
+    check_methods(t, read(src .. "/kavitabrowser.lua"), "KavitaBrowser", {
+        setTitleBarLeftIcon = true,
+        switchItemTable = true,
+    }, "kavitabrowser")
+    check_methods(t, read(src .. "/kamareimageviewer.lua"), "KamareImageViewer", {
+        registerTouchZones = true,
+    }, "kamareimageviewer")
 end

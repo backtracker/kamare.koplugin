@@ -496,7 +496,7 @@ function KavitaBrowser:_decorateSeriesItems(items, server_key, series_id)
 end
 
 function KavitaBrowser:_cacheEntriesFor(chapters)
-    local key = self:_server_key_for_current()
+    local key = self:_serverKeyForCurrent()
     local store = self:_store()
     local sid = self.current_series_id
     if not key or not sid then return {} end
@@ -613,7 +613,7 @@ function KavitaBrowser:_showSeriesDownloadDialog()
                 UIManager:close(dialog)
                 local start = 1
                 for i, c in ipairs(cache) do
-                    local pos = self:_journal():get_position(self:_server_keyForCurrent() or "", c.id)
+                    local pos = self:_journal():get_position(self:_serverKeyForCurrent() or "", c.id)
                     if (pos and pos.pageNum and pos.pageNum > 0) or (c.pagesRead and c.pagesRead > 0) then
                         start = i
                         break
@@ -657,7 +657,7 @@ function KavitaBrowser:_enqueueNextVolumes(n)
     if not n or n <= 0 then return end
     local detail = self.current_series_detail
     if not detail then return end
-    local key = self:_server_key_for_current()
+    local key = self:_serverKeyForCurrent()
     local store = self:_store()
     local volumes = {}
     for __, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
