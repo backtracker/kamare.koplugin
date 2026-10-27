@@ -578,7 +578,7 @@ function KavitaBrowser:_cacheEntriesFor(chapters)
     return out
 end
 
-function KavitaBrowser:_queueOrRetry(entries)
+function KavitaBrowser:_queueOrRetry(entries, opts)
     local queue = self:_queue()
     local all_queued = #entries > 0
     for __, e in ipairs(entries) do
@@ -590,7 +590,7 @@ function KavitaBrowser:_queueOrRetry(entries)
         self:onCacheStateChanged()
         return
     end
-    self:_confirmAndEnqueue(entries)
+    self:_confirmAndEnqueue(entries, opts)
 end
 
 function KavitaBrowser:_abortQueueFor(server_key, series_id)
@@ -604,11 +604,43 @@ function KavitaBrowser:_abortQueueFor(server_key, series_id)
     for __, id in ipairs(ids) do queue:abort(server_key, id) end
 end
 
-function KavitaBrowser:_confirmAndEnqueue(entries)
+-- The browser shows volumes, but the queue stores Kavita chapters. Name the
+-- unit the user actually picked: "this volume" / "this chapter", and count
+-- distinct volumes for series-wide actions.
+function KavitaBrowser:_cacheUnitText(entries, unit)
+    entries = entries or {}
+    if unit == "volume" then
+        if #entries > 1 then return T(_("this volume (%1 chapters)"), #entries) end
+        return _("this volume")
+    elseif unit == "chapter" then
+        return _("this chapter")
+    end
+    local seen, volumes, chapters = {}, 0, 0
+    for __, e in ipairs(entries) do
+        local vid = tonumber(e.volumeId)
+        if vid and vid > 0 then
+            if not seen[vid] then
+                seen[vid] = true
+                volumes = volumes + 1
+            end
+        else
+            chapters = chapters + 1
+        end
+    end
+    if volumes > 0 and chapters > 0 then
+        return T(_("%1 volumes + %2 chapters"), volumes, chapters)
+    elseif volumes > 0 then
+        return volumes == 1 and _("1 volume") or T(_("%1 volumes"), volumes)
+    end
+    return #entries == 1 and _("1 chapter") or T(_("%1 chapters"), #entries)
+end
+
+function KavitaBrowser:_confirmAndEnqueue(entries, opts)
     if not entries or #entries == 0 then
         UIManager:show(InfoMessage:new{ text = _("Everything selected is already cached") })
         return
     end
+    local unit_text = self:_cacheUnitText(entries, opts and opts.unit)
     local store = self:_store()
     local peak_factor = self:_queue().PEAK_FACTOR or 2.05
     local download_bytes, peak_bytes = 0, 0
@@ -628,8 +660,8 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
 
     local dialog
     dialog = ConfirmBox:new{
-        text = T(_("Cache %1 chapter(s)? Download %2, unpack peak %3 (%4 available)"),
-            #entries, format_bytes(download_bytes), format_bytes(peak_bytes),
+        text = T(_("Cache %1? Download %2, unpack peak %3 (%4 available)"),
+            unit_text, format_bytes(download_bytes), format_bytes(peak_bytes),
             format_bytes(free or 0)),
         ok_text = _("Download"),
         ok_callback = function()
@@ -638,7 +670,7 @@ function KavitaBrowser:_confirmAndEnqueue(entries)
             if not ok then
                 UIManager:show(InfoMessage:new{ text = tostring(err) })
             else
-                UIManager:show(InfoMessage:new{ text = T(_("Queued %1 chapter(s)"), #entries) })
+                UIManager:show(InfoMessage:new{ text = T(_("Queued %1"), unit_text) })
                 self:onCacheStateChanged()
                 self:refreshCurrentView()
             end
@@ -1197,7 +1229,8 @@ function KavitaBrowser:_deleteChapters(list, opts)
         end
     end
 
-    local text = T(_("Delete %1 chapter(s), freeing about %2?"), #filtered, format_bytes(total))
+    local text = T(_("Delete %1, freeing about %2?"),
+        self:_cacheUnitText(filtered, opts.unit), format_bytes(total))
     if pending > 0 then
         text = text .. "\n\n" .. T(_("%1 chapter(s) have progress waiting to sync; deleting the cache does not stop that sync."), pending)
     end
@@ -1219,7 +1252,8 @@ function KavitaBrowser:_deleteChapters(list, opts)
                 store:delete_chapter(c.serverKey, c.seriesId, c.chapterId)
             end
             UIManager:show(InfoMessage:new{
-                text = T(_("Deleted %1 chapter(s), freed %2"), #filtered, format_bytes(total)),
+                text = T(_("Deleted %1, freed %2"),
+                    self:_cacheUnitText(filtered, opts.unit), format_bytes(total)),
             })
             if opts.after then opts.after() end
             self:onCacheStateChanged()
@@ -3718,7 +3752,7 @@ function KavitaBrowser:onMenuHold(item)
                                         and chapter.files[1].koreaderHash,
                                     files = chapter.files,
                                 },
-                            }))
+                            }), { unit = "chapter" })
                         end,
                     },
                 })
@@ -3762,7 +3796,7 @@ function KavitaBrowser:onMenuHold(item)
                                     serverKey = cache_key, seriesId = self.current_series_id,
                                     chapterId = chapter.id, pages = pages, bytes = bytes,
                                 },
-                            })
+                            }, { unit = "chapter" })
                         end,
                     },
                 })
@@ -3939,7 +3973,7 @@ function KavitaBrowser:onMenuHold(item)
                             text = "\u{2913} " .. _("Download volume"),
                             callback = function()
                                 UIManager:close(dialog)
-                                self:_queueOrRetry(entries)
+                                self:_queueOrRetry(entries, { unit = "volume" })
                             end,
                         },
                     })
@@ -3959,7 +3993,7 @@ function KavitaBrowser:onMenuHold(item)
                             text = _("Delete volume cache"),
                             callback = function()
                                 UIManager:close(dialog)
-                                self:_deleteChapters(cached_descriptors)
+                                self:_deleteChapters(cached_descriptors, { unit = "volume" })
                             end,
                         },
                     })

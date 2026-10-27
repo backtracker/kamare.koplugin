@@ -615,8 +615,8 @@ msgstr "已清空全部缓存，释放 %1"
 msgid "Already cached or queued"
 msgstr "已缓存或已在队列中"
 
-msgid "Cache %1 chapter(s)? Download %2, unpack peak %3 (%4 available)"
-msgstr "缓存 %1 章？下载 %2，解包峰值 %3（可用 %4）"
+msgid "Cache %1? Download %2, unpack peak %3 (%4 available)"
+msgstr "缓存 %1？下载 %2，解包峰值 %3（可用 %4）"
 
 msgid "Cache cleared, freed %1"
 msgstr "缓存已清空，释放 %1"
@@ -687,8 +687,8 @@ msgstr "联网后才能浏览服务器"
 msgid "Connect to check for cache updates"
 msgstr "联网后才能检查缓存更新"
 
-msgid "Delete %1 chapter(s), freeing about %2?"
-msgstr "删除 %1 章，释放约 %2？"
+msgid "Delete %1, freeing about %2?"
+msgstr "删除 %1，释放约 %2？"
 
 msgid "Delete all cached chapters in this series"
 msgstr "删除本系列全部缓存章节"
@@ -717,8 +717,8 @@ msgstr "删除本系列缓存"
 msgid "Delete volume cache"
 msgstr "删除本卷缓存"
 
-msgid "Deleted %1 chapter(s), freed %2"
-msgstr "已删除 %1 章，释放 %2"
+msgid "Deleted %1, freed %2"
+msgstr "已删除 %1，释放 %2"
 
 msgid "Deleted this series cache, freed %1"
 msgstr "已删除本系列缓存，释放 %1"
@@ -861,8 +861,8 @@ msgstr "已暂停"
 msgid "Queued"
 msgstr "排队中"
 
-msgid "Queued %1 chapter(s)"
-msgstr "已加入队列 %1 章"
+msgid "Queued %1"
+msgstr "已加入队列 %1"
 
 msgid "Queued %1 chapter(s) for update"
 msgstr "已加入更新队列 %1 章"
@@ -934,3 +934,27 @@ msgstr "保留服务器"
 
 msgid "Use this device"
 msgstr "用本机位置"
+
+msgid "this volume"
+msgstr "本卷"
+
+msgid "this volume (%1 chapters)"
+msgstr "本卷（%1 章）"
+
+msgid "this chapter"
+msgstr "本章"
+
+msgid "1 volume"
+msgstr "1 卷"
+
+msgid "%1 volumes"
+msgstr "%1 卷"
+
+msgid "1 chapter"
+msgstr "1 章"
+
+msgid "%1 chapters"
+msgstr "%1 章"
+
+msgid "%1 volumes + %2 chapters"
+msgstr "%1 卷 + %2 章"
