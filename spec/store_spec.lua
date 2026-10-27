@@ -12,6 +12,9 @@ local function fake_settings(servers)
     function s:saveSetting(key, value)
         self.data[key] = value
     end
+    function s:flush()
+        self.flushed = (self.flushed or 0) + 1
+    end
     return s
 end
 
@@ -168,6 +171,7 @@ return function(t)
     local generated = store:resolve_server_key(settings, { base_url = "https://legacy" })
     t.ok(generated and #generated == 8 and generated:match("^[0-9a-f]+$"), "legacy key generated")
     t.eq(settings.data.servers[2].key, generated, "legacy key persisted")
+    t.ok((settings.flushed or 0) >= 1, "server key change flushed immediately")
     t.eq(store:resolve_server_key(settings, { base_url = "https://legacy" }), generated, "key stable")
     t.is_nil(store:resolve_server_key(settings, { base_url = "https://unknown" }), "unknown server nil")
 end

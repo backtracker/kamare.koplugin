@@ -2394,6 +2394,7 @@ function KavitaBrowser:persistBearerToken(server_name, server_url, token)
     end
 
     self.kamare_settings:saveSetting("servers", servers)
+    pcall(function() self.kamare_settings:flush() end)
     self.servers = servers
 end
 
@@ -2438,6 +2439,7 @@ function KavitaBrowser:persistServerVersion(server_name, server_url, version)
     end
 
     self.kamare_settings:saveSetting("servers", servers)
+    pcall(function() self.kamare_settings:flush() end)
     self.servers = servers
 end
 
@@ -2634,9 +2636,10 @@ function KavitaBrowser:editServerFromInput(fields, item)
     self.item_table[new_idx] = new_item
     self:switchItemTable(nil, self.item_table, itemnumber)
 
-    -- Save servers to settings (will be flushed by main plugin)
+    -- Flush immediately: crashes must not lose a freshly added server.
     if self.kamare_settings then
         self.kamare_settings:saveSetting("servers", self.servers)
+        pcall(function() self.kamare_settings:flush() end)
     end
 end
 
@@ -2646,9 +2649,10 @@ function KavitaBrowser:deleteCatalog(item)
     table.remove(self.item_table, item.idx)
     self:switchItemTable(nil, self.item_table, -1)
 
-    -- Save servers to settings (will be flushed by main plugin)
+    -- Flush immediately so a crash cannot resurrect a deleted server.
     if self.kamare_settings then
         self.kamare_settings:saveSetting("servers", self.servers)
+        pcall(function() self.kamare_settings:flush() end)
     end
 end
 

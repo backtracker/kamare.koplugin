@@ -674,6 +674,9 @@ function Store:resolve_server_key(settings, server)
     end
     entry.key = self:generate_server_key(existing)
     settings:saveSetting("servers", servers)
+    -- Persist immediately: a crash before KOReader's normal settings flush
+    -- must not lose the only copy of the server configuration.
+    pcall(function() settings:flush() end)
     logger.info("[kamare:cache] generated server key", entry.key, "for", tostring(entry.name))
     return entry.key
 end
