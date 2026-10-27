@@ -1071,25 +1071,36 @@ function KavitaBrowser:showOfflineSeries(item)
     local cache = self:_cacheStatusContext(key)
     for __, c in ipairs(chapters) do
         local cached = cache.by_id[c.id] ~= nil
-        local status = self:_chapterStatus(key, sid, c, cache)
-        if cached then cached_count = cached_count + 1 end
-        local title = clean_cached_title(c.title) or tostring(c.number or c.id)
-        items[#items + 1] = {
-            text = title,
-            author = cached and status or _("Not cached"),
-            cache_offline_chapter = true,
-            _cache_server_key = key,
-            _cache_series_id = sid,
-            _chapter_id = c.id,
-            chapter = {
-                id = c.id, pages = c.pages, volumeId = c.volumeId,
-                number = c.number, titleName = title, order = c.order,
-                pagesRead = 0,
-            },
-            select_enabled = cached or false,
-            is_file = true,
-            file = string.format("/kamare/cache/%s/series/%s/chapter/%s.kamare",
-                key, tostring(sid), tostring(c.id)),
+        if cached then
+            cached_count = cached_count + 1
+            local title = clean_cached_title(c.title) or tostring(c.number or c.id)
+            -- Local position, so the right-hand percentage is not stuck at 0%.
+            local pos = self:_journal():get_position(key, c.id)
+            -- Offline list: only what can actually be opened. Uncached rows
+            -- were just noise here (they are not selectable offline).
+            items[#items + 1] = {
+                text = title,
+                author = self:_chapterStatus(key, sid, c, cache),
+                cache_offline_chapter = true,
+                _cache_server_key = key,
+                _cache_series_id = sid,
+                _chapter_id = c.id,
+                chapter = {
+                    id = c.id, pages = c.pages, volumeId = c.volumeId,
+                    number = c.number, titleName = title, order = c.order,
+                    pagesRead = (pos and tonumber(pos.pageNum)) or 0,
+                },
+                select_enabled = true,
+                is_file = true,
+                file = string.format("/kamare/cache/%s/series/%s/chapter/%s.kamare",
+                    key, tostring(sid), tostring(c.id)),
+            }
+        end
+    end
+    if #items == 0 then
+        items[1] = {
+            text = _("No cached chapters · cache some to read offline"),
+            select_enabled = false,
         }
     end
     self.catalog_author = T(_("%1/%2 chapters cached"), cached_count, #chapters)
