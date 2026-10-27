@@ -958,3 +958,12 @@ msgstr "%1 章"
 
 msgid "%1 volumes + %2 chapters"
 msgstr "%1 卷 + %2 章"
+
+msgid "Simulate offline (debug)"
+msgstr "模拟离线（调试）"
+
+msgid "Stop simulating offline"
+msgstr "停止模拟离线"
+
+msgid "Simulated offline: cached series only"
+msgstr "模拟离线：仅显示已缓存系列"

@@ -138,6 +138,16 @@ function Kamare:addToMainMenu(menu_items)
     }
 end
 
+-- True offline, or the desktop-only "simulate offline" debug switch. Devices
+-- without a Wi-Fi toggle always report isOnline() == true, so the offline entry
+-- could otherwise never be exercised on an emulator/desktop.
+function Kamare:isOffline()
+    if self.kamare_settings and self.kamare_settings:readSetting("force_offline", false) then
+        return true
+    end
+    return NetworkMgr:isOnline() == false
+end
+
 -- Lazily build the shared cache context: one store, one journal and one
 -- download queue for the whole plugin session (spec 05 A10: single writer).
 function Kamare:_getCacheContext()
@@ -170,6 +180,15 @@ function Kamare:_getCacheContext()
         settings = self.kamare_settings,
         client = KavitaClient,
         ui = ui,
+        -- Route the queue's online/wifi checks through the plugin so the
+        -- simulated-offline switch pauses and resumes downloads too.
+        network = {
+            isOnline = function() return not self:isOffline() end,
+            isWifiOn = function()
+                local ok, on = pcall(function() return NetworkMgr:isWifiOn() end)
+                return (not ok) or on ~= false
+            end,
+        },
     }
     queue:load()
 
@@ -186,7 +205,7 @@ end
 
 function Kamare:_syncJournal()
     local ctx = self:_getCacheContext()
-    if not NetworkMgr:isOnline() then return end
+    if self:isOffline() then return end
     local KavitaClient = require("kavitaclient")
     -- Automatic sync is strictly monotonic. The "current book is behind"
     -- exception is handled interactively by the manual Sync action.
@@ -219,6 +238,12 @@ function Kamare:_showBrowser(offline)
         close_callback = function()
             UIManager:close(self.browser)
         end,
+        set_offline_mode = function(forced)
+            self.kamare_settings:saveSetting("force_offline", forced and true or false)
+            pcall(function() self.kamare_settings:flush() end)
+            UIManager:close(self.browser)
+            UIManager:nextTick(function() self:_showBrowser(forced and true or false) end)
+        end,
     }
 
     UIManager:show(self.browser)
@@ -230,7 +255,7 @@ end
 
 function Kamare:onShowKavitaBrowser()
     -- Offline: go straight to the cached shelf; never prompt to enable Wi-Fi.
-    if NetworkMgr:isOnline() == false then
+    if self:isOffline() then
         self:_showBrowser(true)
         return
     end

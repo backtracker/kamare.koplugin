@@ -1,4 +1,5 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local Device = require("device")
 local ConfirmBox = require("ui/widget/confirmbox")
 -- Transient notices auto-dismiss; explicit `timeout = 0` still means "keep
 -- open until the code closes it" (loading messages).
@@ -808,7 +809,12 @@ function KavitaBrowser:_shelfSubtitle()
     local parts = {}
     local status = queue:status()
     local active = status.state == "downloading" or status.state == "extracting"
-    if self.offline then parts[#parts + 1] = _("Offline: showing cached series only") end
+    if self.offline then
+        local simulated = self.kamare_settings
+            and self.kamare_settings:readSetting("force_offline", false)
+        parts[#parts + 1] = simulated and _("Simulated offline: cached series only")
+            or _("Offline: showing cached series only")
+    end
     local usage = self:_cachedUsage(store, active)
     if usage.chapters > 0 then
         parts[#parts + 1] = T(_("Used %1 · %2 free"),
@@ -1722,6 +1728,22 @@ function KavitaBrowser:showTitleMenu()
                 align = "left",
             }})
         end
+    end
+
+    -- Desktop/emulator only: there is no Wi-Fi toggle, so NetworkMgr always
+    -- reports online and the offline paths could never be exercised.
+    if not Device:hasWifiToggle() and self.set_offline_mode then
+        local simulated = self.kamare_settings
+            and self.kamare_settings:readSetting("force_offline", false)
+        table.insert(buttons, {{
+            text = simulated and _("Stop simulating offline")
+                or _("Simulate offline (debug)"),
+            callback = function()
+                UIManager:close(dialog)
+                self.set_offline_mode(not simulated)
+            end,
+            align = "left",
+        }})
     end
 
     table.insert(buttons, {{
