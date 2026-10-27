@@ -601,6 +601,9 @@ function Cache.estimate(base_url, entries)
     if not base_url or base_url == "" then
         return nil, "base_url_required", _("Server URL required")
     end
+    if type(entries) ~= "table" then
+        return nil, "entries_required", _("Nothing to estimate")
+    end
     local ctx = ensure_identity()
     local key = find_key(ctx, base_url)
     if not key then return nil, "unknown_server", _("Unknown server") end

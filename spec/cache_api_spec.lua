@@ -620,6 +620,13 @@ return function(t)
     t.eq(failed_hydrate and failed_hydrate.reason, "nothing_to_do",
         "failed hydration leaves nothing to do")
 
+    local est_bad, est_badcode = Cache.estimate("https://example", "not-a-list")
+    t.is_nil(est_bad, "estimate rejects a non-table entries argument")
+    t.eq(est_badcode, "entries_required", "estimate entries_required code")
+    local est_missing, est_missingcode = Cache.estimate("https://example")
+    t.is_nil(est_missing, "estimate rejects a missing entries argument")
+    t.eq(est_missingcode, "entries_required", "estimate missing entries code")
+
     est_free = 100
     local no_space = Cache.estimate("https://example", {
         { chapterId = 103, seriesId = 20, volumeId = 30, libraryId = 10, pages = 3,
