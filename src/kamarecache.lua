@@ -648,26 +648,17 @@ function Cache.estimate(base_url, entries)
         end
     end
 
-    local available = ctx.store:free_bytes()
+    -- The verdict comes from the same function enqueue uses. Estimate maps its
+    -- codes onto its own reason vocabulary; "nothing to do" is estimate-only
+    -- (enqueue says already_cached / already_queued instead).
+    local code, _msg, _detail, available = queue:space_verdict(bytes)
     local reason
     if chapters == 0 then
         reason = "nothing_to_do"
-    else
-        local limit_mb = 0
-        if ctx.settings then
-            limit_mb = tonumber(ctx.settings:readSetting("cache_limit_mb", 0)) or 0
-        end
-        if limit_mb > 0 then
-            local limit = limit_mb * 1024 * 1024
-            local used = ctx.store:total_usage().used
-            if used + bytes > limit then reason = "space" end
-        end
-        if not reason and available and bytes > available then
-            reason = "space"
-        end
-        if not reason and available and available < low_water then
-            reason = "low_water"
-        end
+    elseif code == "cache_limit_reached" or code == "not_enough_space" then
+        reason = "space"
+    elseif code == "low_space" then
+        reason = "low_water"
     end
 
     return {

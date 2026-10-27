@@ -709,6 +709,64 @@ return function(t)
     t.is_nil(dcok, "a cached chapter is not enqueued")
     t.eq(dccode, "already_cached", "already_cached code")
 
+    -- estimate (preview) and enqueue (authority) must reach the same verdict
+    -- from the same input: one shared space ladder (01 A8).
+    local vd_dir = t.tmpdir()
+    local vd_store = Store:new{ data_dir = vd_dir }
+    local vd_settings = fake_settings()
+    local vd_free = 10 * 1024 * 1024 * 1024
+    vd_store.free_bytes = function() return vd_free end
+    local vd_queue = real_queue(vd_store, vd_settings)
+    Cache.set_context(nil)
+    Cache.set_context{
+        store = vd_store, settings = vd_settings, client = {}, queue = vd_queue,
+    }
+    local vd_entry = function(chapter_id)
+        return { chapterId = chapter_id, seriesId = 20, volumeId = 30, libraryId = 10,
+            pages = 3, archiveBytes = 1000, files = {} }
+    end
+
+    local vd_ok = Cache.estimate("https://example", { vd_entry(400) })
+    t.is_nil(vd_ok and vd_ok.reason, "shared verdict: fitting input estimates ok")
+    local vd_enq, vd_code = Cache.enqueue("https://example", { vd_entry(400) })
+    t.ok(vd_enq, "shared verdict: fitting input enqueues " .. tostring(vd_code))
+
+    local vd_queued = Cache.estimate("https://example", { vd_entry(400) })
+    t.eq(vd_queued and vd_queued.reason, "nothing_to_do",
+        "shared verdict: queued input is nothing to do")
+    local _, vd_quecode = Cache.enqueue("https://example", { vd_entry(400) })
+    t.eq(vd_quecode, "already_queued", "shared verdict: enqueue agrees it is queued")
+
+    meta(vd_store, 401)
+    local vd_cached = Cache.estimate("https://example", { { chapterId = 401, seriesId = 20 } })
+    t.eq(vd_cached and vd_cached.reason, "nothing_to_do",
+        "shared verdict: cached input is nothing to do")
+    local _, vd_cacode = Cache.enqueue("https://example", { vd_entry(401) })
+    t.eq(vd_cacode, "already_cached", "shared verdict: enqueue agrees it is cached")
+
+    vd_free = 1000
+    local vd_space = Cache.estimate("https://example", { vd_entry(402) })
+    t.eq(vd_space and vd_space.reason, "space", "shared verdict: short space estimates space")
+    local _, vd_spcode = Cache.enqueue("https://example", { vd_entry(402) })
+    t.eq(vd_spcode, "not_enough_space", "shared verdict: enqueue agrees on not_enough_space")
+
+    vd_free = 100 * 1024 * 1024
+    local vd_low = Cache.estimate("https://example", { vd_entry(403) })
+    t.eq(vd_low and vd_low.reason, "low_water", "shared verdict: low water estimates low_water")
+    local _, vd_locode = Cache.enqueue("https://example", { vd_entry(403) })
+    t.eq(vd_locode, "low_space", "shared verdict: enqueue agrees on low_space")
+
+    vd_free = 10 * 1024 * 1024 * 1024
+    vd_settings.data.cache_limit_mb = 1
+    vd_store.total_usage = function() return { used = 1024 * 1024, chapters = 5 } end
+    local vd_limit = Cache.estimate("https://example", { vd_entry(404) })
+    t.eq(vd_limit and vd_limit.reason, "space",
+        "shared verdict: cache limit estimates space")
+    local _, vd_licode = Cache.enqueue("https://example", { vd_entry(404) })
+    t.eq(vd_licode, "cache_limit_reached", "shared verdict: enqueue agrees on the cache limit")
+    vd_settings.data.cache_limit_mb = nil
+    vd_store.total_usage = nil
+
     -- delete of the chapter being downloaded lets the queue continue (07 A4).
     local dl_dir = t.tmpdir()
     local dl_store = Store:new{ data_dir = dl_dir }

@@ -277,6 +277,47 @@ function Queue:_hydrate(entry)
     return true
 end
 
+-- The one space ladder, shared by enqueue (the authority) and the facade's
+-- estimate (the preview): cache limit, then free space, then the low-water
+-- mark. Returns code, message, detail, available; a nil code means it fits.
+-- Keeping it here is what makes a preview unable to disagree with the real
+-- enqueue (spec 01 A8).
+function Queue:space_verdict(peak_bytes)
+    peak_bytes = tonumber(peak_bytes) or 0
+    local available = self.store:free_bytes()
+
+    if self.settings then
+        local limit_mb = tonumber(self.settings:readSetting("cache_limit_mb", 0)) or 0
+        if limit_mb > 0 then
+            local limit = limit_mb * 1024 * 1024
+            local used = self.store:total_usage().used
+            if used + peak_bytes > limit then
+                return "cache_limit_reached",
+                    string.format(_("Cache limit reached: %s of %s used"),
+                        string.format("%.0f MB", used / (1024 * 1024)),
+                        string.format("%.0f MB", limit / (1024 * 1024))),
+                    { used = used, limit = limit, needed = peak_bytes },
+                    available
+            end
+        end
+    end
+
+    if available and peak_bytes > available then
+        return "not_enough_space",
+            string.format(_("Not enough space: unpack peak %.0f MB, %.0f MB available"),
+                peak_bytes / (1024 * 1024), available / (1024 * 1024)),
+            { needed = peak_bytes, available = available },
+            available
+    end
+    if available and available < self.LOW_WATER_BYTES then
+        return "low_space", _("Not enough free space to download"),
+            { available = available, low_water = self.LOW_WATER_BYTES },
+            available
+    end
+
+    return nil, nil, nil, available
+end
+
 function Queue:enqueue(entries, opts)
     opts = opts or {}
     if type(entries) ~= "table" or #entries == 0 then
@@ -320,32 +361,10 @@ function Queue:enqueue(entries, opts)
     end
 
     -- Optional absolute cap (default off): quota applies to the whole cache.
-    if self.settings then
-        local limit_mb = tonumber(self.settings:readSetting("cache_limit_mb", 0)) or 0
-        if limit_mb > 0 then
-            local limit = limit_mb * 1024 * 1024
-            local used = self.store:total_usage().used
-            if used + total > limit then
-                return nil, "cache_limit_reached",
-                    string.format(_("Cache limit reached: %s of %s used"),
-                        string.format("%.0f MB", used / (1024 * 1024)),
-                        string.format("%.0f MB", limit / (1024 * 1024))),
-                    { used = used, limit = limit, needed = total }
-            end
-        end
-    end
-
-    local available = self.store:free_bytes()
-    if available and total > available then
-        return nil, "not_enough_space",
-            string.format(_("Not enough space: unpack peak %.0f MB, %.0f MB available"),
-                total / (1024 * 1024), available / (1024 * 1024)),
-            { needed = total, available = available }
-    end
-    if available and available < self.LOW_WATER_BYTES then
-        return nil, "low_space", _("Not enough free space to download"),
-            { available = available, low_water = self.LOW_WATER_BYTES }
-    end
+    -- The verdict order and all constants live in Queue:space_verdict so the
+    -- facade's estimate can never drift from the real enqueue.
+    local code, message, detail, available = self:space_verdict(total)
+    if code then return nil, code, message, detail end
 
     if opts.confirm then
         local ok, confirmed = pcall(opts.confirm, {
