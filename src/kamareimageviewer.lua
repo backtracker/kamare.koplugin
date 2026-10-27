@@ -405,7 +405,27 @@ function KamareImageViewer:_initCanvas()
     -- Wire the render-path "pending" callback: when the canvas paints a page
     -- whose image isn't cached yet, request it async; on arrival a setDirty
     -- repaint renders the real page where the placeholder glyph was.
-    self.canvas.on_pending_page = function(page) self:_onPendingRenderPage(page) end
+    -- Never handle a pending page synchronously from paintTo: _ensurePageReady
+    -- may run crop detection and call update(), which rebuilds
+    -- frame_elements while VerticalGroup:paintTo is still iterating its cached
+    -- offsets (crash: "attempt to index a nil value"). Coalesce per tick.
+    self._pending_render_pages = {}
+    self._pending_render_queued = false
+    self.canvas.on_pending_page = function(page)
+        if not page then return end
+        self._pending_render_pages[page] = true
+        if self._pending_render_queued then return end
+        self._pending_render_queued = true
+        UIManager:nextTick(function()
+            self._pending_render_queued = false
+            local pages = self._pending_render_pages or {}
+            self._pending_render_pages = {}
+            if not self.canvas then return end
+            for pending in pairs(pages) do
+                self:_onPendingRenderPage(pending)
+            end
+        end)
+    end
 
     self.image_container = self.canvas_container
 end
