@@ -13,8 +13,67 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 - **Smart Prefetching** - Fast page turns through caching
 - **Progress Tracking** - Syncs with Kavita and KOReader reading stats
 - **Optimized Renderer** - Custom-built for fluid manga reading experience
+- **Offline Cache** - Download whole chapters, read them with no connection, sync progress on reconnect
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
+
+## What's new in 0.10
+
+0.10 was built in two passes: the cache itself first, then the public API another
+plugin can drive.
+
+### Pass 1 — offline cache (Kamare on its own)
+
+- **Whole-chapter downloads.** One request per chapter
+  (`/api/Download/chapter`), resumable with HTTP Range, three attempts with
+  2/8/20 s backoff. A 403, a multi-file chapter, a non-archive response or a
+  page-order mismatch falls back to fetching page by page.
+- **Archive extraction that matches Kavita.** Entry order replicates Kavita's
+  flatten + natural sort, so page N locally is page N on the server; the page
+  list is validated against `file-dimensions` before the archive is accepted.
+- **One serial download queue** for the whole plugin: live progress, pause /
+  resume / retry, Wi-Fi-only by default, a low-space precheck that pauses
+  instead of failing, persisted across restarts and never started automatically.
+- **Offline shelf.** Opening the plugin without a connection goes straight to
+  the cached series list. Uncached chapters are shown but disabled, and a
+  cached chapter opens from disk with zero image requests.
+- **Offline reading journal.** Positions are kept in
+  `settings/kamare-journal.json` (never deleted with the cache), debounced to
+  disk, and pushed back monotonically on reconnect — a position is only pushed
+  when it is ahead of the server's.
+- **Cache management**: usage, sorting, delete read chapters, update outdated
+  chapters, clear per server or everything, optional size cap, and “cache only
+  unread chapters” from the series menu.
+- **Stable cache identity**: `serverKey` survives URL/name edits and API-key
+  rotation, so downloads are not orphaned by a settings change.
+- **Simulated offline** switch on devices without a Wi-Fi toggle (marked debug
+  in the menu), so the offline paths can be exercised on a desktop emulator.
+
+### Pass 2 — public cache API for Moon
+
+- **Versioned facade**: `require("kamarecache")` exposes `API_VERSION = 1` plus
+  a `capabilities` table (`status`, `summary`, `enqueue`, `delete`, `server`,
+  `resume`, `queue`, `queue_control`, `index`, `open`, `estimate`). New
+  capabilities are additive; only a breaking change bumps the major version.
+- **Safe probing**: callers use `pcall(require, "kamarecache")`; a missing
+  module, another major version, or a missing capability degrades silently
+  instead of raising, and one absent capability only disables that feature.
+- **Stable failures**: `nil, code, message` with snake_case codes
+  (`unknown_server`, `offline_not_cached`, `viewer_running`, `chapter_open`,
+  `not_enough_space`, …). Read-only calls never create a server key and never
+  flush settings.
+- **One writer per process**: Kamare publishes its settings/client at startup
+  and adopts any store/journal/queue a caller built first, so there is never a
+  second queue writing the same cache.
+- **Server mirroring and viewer hand-off**: `register_server` mirrors another
+  plugin's base URL + API key; `open` decides cache-first vs. stream, offline
+  refusal, and the start page, and it owns the viewer lifecycle. The `on_next`
+  hook fires after the viewer has closed, so a caller may open the next chapter
+  directly from it.
+- **Documented deviations**: `open` builds the read (journal) tier even when
+  `start_page` is explicit, so the offline session is not lost;
+  `queue_pause` on an empty queue returns `true` and the state honestly stays
+  `idle`.
 
 ## Screenshots
 
@@ -81,7 +140,8 @@ data directory; reading progress stays in `settings/kamare-journal.json` and is
 never deleted together with cached pages.
 
 - Cache entries: long-press a chapter/volume in the series page, or use the
-  top-left menu for whole-series downloads.
+  top-left menu for whole-series downloads (whole series, unread only, from the
+  current chapter on, or the next N volumes).
 - Manage storage: top-left menu → **Cached chapters** (usage, sorting, delete
   read chapters, update outdated chapters, clear cache, optional size limit).
 - Offline: opening the plugin without a connection goes straight to the cached
@@ -91,21 +151,16 @@ never deleted together with cached pages.
   local; Kavita sessions still get one normal 1-page activity per push, so
   Kavita's offline page counts stay low by design.
 
-Releases inject the plugin version into `kamareversion.lua`; checkouts report
-`0.10.0-dev`. The cache module (`kamarecache`) is versioned independently:
-`API_VERSION = 1` with a `capabilities` table, so other plugins can probe it
-with `pcall(require, "kamarecache")` and degrade silently when it is absent.
-Capabilities: `status`, `summary`, `enqueue`, `delete`, `server`
-(`register_server`), `resume` (`resume_page`), `queue` (`queue_state`),
-`queue_control` (pause/resume/retry), `index`, `open`, `estimate`. Failures
-return `nil, code, message` with stable snake_case codes; read-only calls never
-create a server key and never flush settings.
+### Cache API for other plugins
 
-Contract notes: `open` on a cached chapter builds the read (journal) tier even
-when `start_page` is explicit, because the viewer records the offline session
-there on close — a deliberate deviation from the identity-only row in the API
-notes; it still never builds the queue. `queue_pause` on an empty queue
-returns `true` and `queue_state` stays `idle`, which is the truthful state.
+The cache is also a versioned API, so another plugin (Moon's Kavita source is
+the intended consumer) can download, inspect and open cached chapters without
+re-implementing any of it. See [What's new in 0.10](#pass-2--public-cache-api-for-moon)
+for the capability list and error-code contract.
+
+Releases inject the plugin version into `kamareversion.lua`; a plain checkout
+reports `0.10.0-dev`. The cache API version is independent of the plugin
+version (`API_VERSION = 1`, plugin 0.10.x).
 
 ## Development
 
