@@ -44,6 +44,17 @@ Capability probing (spec 09): `pcall(require, "kamarecache")` + api_version +
 capabilities. Missing module or a different major version means "no cache UI",
 silently -- never raise at the caller.
 
+Cleanup-plan limits (cache cleanup 02 E):
+  - `read` is journal OR the download-time snapshot. The journal keeps only
+    `MAX_POSITIONS` entries and drops pushed positions after 7 days, so an old
+    chapter can lose its read flag; callers may OR in their own server progress.
+  - A `.part` with no index entry never appears in `chapters()`; only
+    `delete_all()` removes it.
+  - `bytes` is a per-chapter estimate; `delete_all()` reports its pre-delete
+    estimate, which can differ from what the filesystem actually frees.
+  - `open` protection only covers the viewer in this process; another process
+    can still delete a chapter that is being read.
+
 Viewer hand-off: `open`'s `on_next` runs after the viewer has closed (the
 handler is notified on the next UI tick), so an `on_next` implementation may
 call `open` for the next chapter directly; it will not hit `viewer_running`.
@@ -421,6 +432,9 @@ local function map_entry(base_url, key, entry, series_hint)
         archiveExt = entry.archiveExt,
         koreaderHash = entry.koreaderHash or entry.koreader_hash,
         files = files,
+        -- Freeze the server's progress at enqueue time. Moon's Kavita toc rows
+        -- spell it `pagesRead`; complete entries skip Queue:_hydrate, so this
+        -- alias is the only chance to keep the snapshot for the cleanup plan.
         pagesReadSnapshot = entry.pagesReadSnapshot or entry.pages_read or entry.pagesRead,
         seriesChapters = entry.seriesChapters or entry.series_chapters,
     }
@@ -839,6 +853,14 @@ function Cache.delete_all()
 
     local freed, count = ctx.store:delete_all()
 
+    -- The queue must not look paused after the wipe even when a file survived:
+    -- the entries were aborted above and the truth is an empty idle queue.
+    ctx.queue.state = "idle"
+    ctx.queue.pause_reason = nil
+    ctx.queue.completed_bytes = 0
+    ctx.queue:save()
+    ctx.queue:_changed()
+
     -- remove_tree() failures are silent all the way down; a surviving server
     -- directory is the only observable signal.
     local left = ctx.store:list_server_keys()
@@ -846,11 +868,6 @@ function Cache.delete_all()
         return nil, "delete_incomplete", _("Some cache files could not be deleted")
     end
 
-    ctx.queue.state = "idle"
-    ctx.queue.pause_reason = nil
-    ctx.queue.completed_bytes = 0
-    ctx.queue:save()
-    ctx.queue:_changed()
     return true, nil, { chapters = count, bytes = freed }
 end
 

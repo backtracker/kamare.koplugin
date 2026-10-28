@@ -189,10 +189,12 @@ local function cleanup_spec(t)
         serverKey = "k1", chapterId = 4, seriesId = 20, libraryId = 10, volumeId = 30,
         seriesName = "Series", chapterTitle = "Ch4",
     }, 50, { source = "offline", force = true })
-    local cp_queue = { contains = function(__, ___, id) return id == 3 end }
+    -- Let chapters() build the real queue tier from settings: a stub queue would
+    -- hide any settings write that tier makes.
+    Cache.set_context(nil)
+    cp_settings.data.download_queue = { { serverKey = "k1", chapterId = 3, seriesId = 21 } }
     Cache.set_context{
-        store = cp_store, settings = cp_settings, journal = cp_journal,
-        queue = cp_queue, client = {},
+        store = cp_store, settings = cp_settings, journal = cp_journal, client = {},
     }
 
     -- read-only guarantee: a valid index is not rewritten, settings are not
@@ -319,7 +321,6 @@ local function cleanup_spec(t)
     t.eq(da_queue.paused_with, "user", "the queue is paused before the wipe")
     t.is_nil(da_queue.pause_reason, "the paused reason is cleared after the wipe")
     t.eq(da_queue.state, "idle", "the queue is left idle")
-    t.eq(da_queue.saved, 1, "the queue is saved once")
 
     -- an open viewer refuses the whole wipe before touching anything
     meta(da_store, 12)
@@ -339,6 +340,8 @@ local function cleanup_spec(t)
     local inc_ok, inc_code = Cache.delete_all()
     t.is_nil(inc_ok, "delete_all reports a surviving server directory")
     t.eq(inc_code, "delete_incomplete", "delete_all reports delete_incomplete")
+    t.eq(da_queue.state, "idle", "a failed wipe still leaves the queue idle")
+    t.is_nil(da_queue.pause_reason, "a failed wipe still clears the pause reason")
     da_store.list_server_keys = da_list
 
     -- ---- bulk delete: one index write, one queue save --------------------

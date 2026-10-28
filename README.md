@@ -63,6 +63,10 @@ plugin can drive.
   (`unknown_server`, `offline_not_cached`, `viewer_running`, `chapter_open`,
   `not_enough_space`, …). Read-only calls never create a server key and never
   flush settings.
+- **Cleanup plan limits**: `chapters()` judges "read" from the journal plus the
+  download-time snapshot (old chapters can lose their journal entry), reports
+  per-chapter byte estimates, and a `.part` without an index entry is only
+  visible to `delete_all()`. Open-chapter protection covers this process only.
 - **One writer per process**: Kamare publishes its settings/client at startup
   and adopts any store/journal/queue a caller built first, so there is never a
   second queue writing the same cache.
