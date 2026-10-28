@@ -517,6 +517,46 @@ return function(t)
     t.is_nil(fok, "flush failure is reported")
     t.eq(fcode, "settings_write_failed", "flush failure code")
 
+    do -- scope: the surrounding test function is near the 200-local limit
+    -- LuaSettings:flush() cannot report a failed write (it returns itself even
+    -- when util.writeToFile failed). A read-only data dir must still be
+    -- reported: register_server reads back the file it claims to have written.
+    local silent_dir = t.tmpdir()
+    local silent_path = silent_dir .. "/kamare.lua"
+    local placeholder = io.open(silent_path, "wb")
+    placeholder:write('return { ["servers"] = {} }\n')
+    placeholder:close()
+    local silent = fake_settings()
+    silent.file = silent_path
+    function silent:flush() self.flushed = self.flushed + 1; return self end
+    Cache.set_context{
+        store = Store:new{ data_dir = t.tmpdir() }, settings = silent, client = {},
+    }
+    local sok, scode = Cache.register_server{
+        base_url = "https://silent", api_key = "s",
+    }
+    t.is_nil(sok, "a silent flush failure is not reported as success")
+    t.eq(scode, "settings_write_failed", "silent failure code")
+    -- The first attempt already mutated the in-memory table; an idempotent
+    -- retry must still notice that the file never received the server.
+    local sok2, scode2 = Cache.register_server{
+        base_url = "https://silent", api_key = "s",
+    }
+    t.is_nil(sok2, "an unpersisted server stays a failure on retry")
+    t.eq(scode2, "settings_write_failed", "retry reports the same code")
+
+    -- And a real LuaSettings round-trips: the read-back check must not reject
+    -- a normal save.
+    local live_settings = require("luasettings"):open(silent_dir .. "/live.lua")
+    Cache.set_context{
+        store = Store:new{ data_dir = t.tmpdir() }, settings = live_settings, client = {},
+    }
+    local live_key = Cache.register_server{ base_url = "https://live", api_key = "l" }
+    t.ok(live_key, "a normal save passes the read-back check")
+    t.eq(server_entry(live_settings, "https://live").key, live_key,
+        "the read-back check sees the saved entry")
+    end
+
     -- resume_page: journal > snapshot > nil, read-only.
     local resume_dir = t.tmpdir()
     local resume_store = Store:new{ data_dir = resume_dir }

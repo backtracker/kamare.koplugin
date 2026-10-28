@@ -296,10 +296,26 @@ function Cache.register_server(server)
     ctx.client.auth_method = "apiKey"
     ctx.client.bearer = nil
 
-    if changed then
+    -- `LuaSettings:flush()` returns the settings object even when the file could
+    -- not be written (it drops `util.writeToFile`'s error), so a read-only data
+    -- dir would otherwise look like a successful mirror and Moon would keep
+    -- sending cache requests to a server Kamare never stored. Read the file
+    -- back when the instance exposes its path; test doubles without one keep
+    -- the old flush-result contract. The check runs even for an idempotent
+    -- call: the previous attempt may have mutated memory but not the disk.
+    local function persisted_on_disk()
+        if not settings.file then return true end
+        local reread = require("luasettings"):open(settings.file)
+        for __, saved in ipairs(servers_of(reread)) do
+            if saved.key == entry.key and saved.api_key == api_key then return true end
+        end
+        return false
+    end
+
+    if changed or not persisted_on_disk() then
         settings:saveSetting("servers", servers)
         local ok, flushed = pcall(function() return settings:flush() end)
-        if not ok or flushed == false then
+        if not ok or not flushed or not persisted_on_disk() then
             logger.warn("[kamare:cache] could not persist the server mirror:", tostring(flushed))
             return nil, "settings_write_failed", _("Could not save the server configuration")
         end
