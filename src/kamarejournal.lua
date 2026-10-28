@@ -200,6 +200,9 @@ function Journal:get_position(server_key, chapter_id)
 end
 
 --- Record the position that should be POSTed. `entry` supplies identity.
+--- `page_num` uses Kavita's units, i.e. its 0-based PageNum (0 = first page;
+--- a value >= the page count means finished). It is stored and replayed as
+--- is; anything that turns it into a 1-based reading page must add 1 first.
 --- opts = { source = "online"|"offline", pushed = bool, force = bool }
 function Journal:set_position(entry, page_num, opts)
     opts = opts or {}

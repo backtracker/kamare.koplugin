@@ -362,8 +362,10 @@ function Cache.resume_page(base_url, chapter_id, series_id)
 
     local snapshot = meta and tonumber(meta.pagesReadSnapshot) or nil
     local pages = meta and tonumber(meta.pages) or nil
+    -- pageNum is Kavita's 0-based page, so 0 is a real position (page 1);
+    -- only a negative value is nonsense.
     local journal_page = pos and tonumber(pos.pageNum) or nil
-    if journal_page and journal_page <= 0 then journal_page = nil end
+    if journal_page and journal_page < 0 then journal_page = nil end
     if not journal_page and not (snapshot and snapshot > 0) then
         -- Cached, but no recorded position at all: there is no resume page
         -- (spec 01 A3). Returning page 1 here would claim a source that the

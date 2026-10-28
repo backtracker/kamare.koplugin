@@ -384,10 +384,9 @@ function KavitaBrowser:_chapterStatus(server_key, series_id, chapter, cache)
     if cached then
         if cached.stale then return _("Needs update") end
         local pos = self:_journal():get_position(server_key, chapter.id)
-        if pos and pos.pageNum and cached.pages then
-            if pos.pageNum >= cached.pages then return _("Read · cached") end
-            if pos.pageNum > 0 then return _("Reading · cached") end
-        elseif pos and pos.pageNum and pos.pageNum > 0 then
+        -- The journal's pageNum is Kavita's 0-based page, so 0 is page 1.
+        if pos and pos.pageNum ~= nil then
+            if cached.pages and pos.pageNum >= cached.pages then return _("Read · cached") end
             return _("Reading · cached")
         end
         return _("Cached")
@@ -431,7 +430,7 @@ function KavitaBrowser:_currentChapterIndex(chapters, server_key)
     for i, c in ipairs(chapters or {}) do
         local id = c.id or c.chapterId
         local pos = id and self:_journal():get_position(server_key, id)
-        if pos and tonumber(pos.pageNum) and tonumber(pos.pageNum) > 0 then
+        if pos and tonumber(pos.pageNum) and tonumber(pos.pageNum) >= 0 then
             local ts = tonumber(pos.ts) or 0
             if not best_ts or ts > best_ts then best_ts, best_index = ts, i end
             furthest_index = i
@@ -463,7 +462,7 @@ function KavitaBrowser:_volumeStatus(server_key, series_id, volume, cache)
             cached = cached + 1
             if index_entry.stale then stale = true end
             local pos = self:_journal():get_position(server_key, ch.id)
-            if pos and pos.pageNum and pos.pageNum > 0 then reading = true end
+            if pos and pos.pageNum and pos.pageNum >= 0 then reading = true end
         else
             local entry = queued[ch.id]
             if entry then

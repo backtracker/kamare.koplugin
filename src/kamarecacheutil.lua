@@ -67,10 +67,13 @@ function Util.append_status(subtitle, status)
 end
 
 --- Start page for a cached chapter (05 A5): journal > snapshot > 1.
+--- The units differ on purpose: `journal_page_num` is the journal's pageNum,
+--- i.e. Kavita's 0-based page (0 = first page, `pages` = finished), while
+--- `snapshot` is the 1-based pages-read count. Both yield a 1-based page.
 function Util.resolve_start_page(journal_page_num, snapshot, pages)
     pages = math.max(1, tonumber(pages) or 1)
     local pos = tonumber(journal_page_num)
-    if pos and pos > 0 then return math.min(pos, pages) end
+    if pos and pos >= 0 then return math.min(pos + 1, pages) end
     local snap = tonumber(snapshot)
     if snap and snap > 0 then return math.min(snap, pages) end
     return 1

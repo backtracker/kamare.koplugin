@@ -1,11 +1,16 @@
 local Util = require("kamarecacheutil")
 
 return function(t)
-    -- start page priority (acceptance B5/B6)
-    t.eq(Util.resolve_start_page(60, 30, 194), 60, "journal wins over snapshot")
+    -- start page priority (acceptance B5/B6). The journal holds Kavita's
+    -- 0-based pageNum, so a recorded 53 resumes on page 54 (regression: the
+    -- 0.10 viewer wrote 0-based and the resume path read it as 1-based).
+    t.eq(Util.resolve_start_page(60, 30, 194), 61, "journal wins over snapshot")
+    t.eq(Util.resolve_start_page(53, nil, 196), 54, "0-based journal page resumes one page later")
+    t.eq(Util.resolve_start_page(0, nil, 196), 1, "page 0 is the first page")
     t.eq(Util.resolve_start_page(nil, 30, 194), 30, "snapshot fallback")
     t.eq(Util.resolve_start_page(nil, nil, 194), 1, "no record starts at 1")
     t.eq(Util.resolve_start_page(999, nil, 194), 194, "journal clamped to page count")
+    t.eq(Util.resolve_start_page(195, nil, 196), 196, "last page stays the last page")
     t.eq(Util.resolve_start_page(0, 0, 0), 1, "degenerate input")
 
     -- read union (acceptance D6)

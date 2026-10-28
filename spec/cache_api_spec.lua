@@ -334,7 +334,7 @@ return function(t)
     local position_count = #resume_journal:all_positions()
     local flushes_before = resume_settings.flushed
     local from_journal = Cache.resume_page("https://example", 13)
-    t.eq(from_journal and from_journal.page, 60, "journal wins over the snapshot")
+    t.eq(from_journal and from_journal.page, 61, "journal wins over the snapshot")
     t.eq(from_journal and from_journal.source, "journal", "journal source")
     t.eq(from_journal and from_journal.status, "pending", "journal status is passed through")
     t.eq(from_journal and from_journal.updated_at, 5000, "journal timestamp is passed through")
@@ -966,7 +966,7 @@ return function(t)
         chapterTitle = captured.metadata.chapterTitle,
     }, 4, { source = "offline", force = true })
     local closed = Cache.resume_page("https://example", 60, 20)
-    t.eq(closed and closed.page, 4, "the position written on close is readable")
+    t.eq(closed and closed.page, 5, "the position written on close is readable")
     t.eq(closed and closed.source, "journal", "close records a journal-sourced position")
     package.loaded["kamareimageviewer"] = nil
 

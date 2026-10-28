@@ -241,8 +241,9 @@ function KamareImageViewer:init()
             chapterTitle = self.metadata.chapterTitle,
         }
         if self.offline then
-            self.cache_journal:session_start(self.cache_identity, self.metadata.startPage or 1,
-                { source = "offline" })
+            -- Sessions share the journal's units: Kavita's 0-based pageNum.
+            self.cache_journal:session_start(self.cache_identity,
+                math.max(0, (self.metadata.startPage or 1) - 1), { source = "offline" })
         end
     end
 
@@ -3462,34 +3463,42 @@ function KamareImageViewer:_postViewProgress(force)
             and self.virtual_document:getPhysicalPageCount())
         or self._images_list_nb
 
-    local page_to_post
+    -- Journal / wire page: Kavita's 0-based PageNum (0 = first page). At the
+    -- end of the chapter it deliberately becomes `pages`, one past the last
+    -- 0-based index, which is how a finished chapter is reported. The reader
+    -- itself sits on `physical_page` (1-based), so the two differ by the base.
     local on_last_page = physical_page == physical_nb
+    local journal_page
 
     if on_last_page or at_end then
-        page_to_post = physical_page
+        journal_page = physical_page
     else
-        page_to_post = math.max(1, physical_page - 1)
+        journal_page = math.max(0, physical_page - 1)
     end
 
-    if self.last_posted_page == page_to_post and not (at_end or on_last_page) then return end
+    if self.last_posted_page == journal_page and not (at_end or on_last_page) then return end
 
     -- Journal first: a crash during the POST must not lose the position.
     local journal = self.cache_journal
     if journal and self.cache_identity then
-        journal:set_position(self.cache_identity, page_to_post, {
+        journal:set_position(self.cache_identity, journal_page, {
             source = self.offline and "offline" or "online",
             force = force and true or false,
         })
         if self.offline then
-            journal:session_update(self.cache_identity, page_to_post)
+            journal:session_update(self.cache_identity, journal_page)
         end
     end
 
     -- Fully offline: post nothing, only the journal moves.
     if self.offline then
-        self.last_posted_page = page_to_post
+        self.last_posted_page = journal_page
         return
     end
+
+    -- Kavita never needs "page 0": while the reader is on page 1 keep the old
+    -- behaviour of reporting page 1, the journal stays exactly 0-based.
+    local page_to_post = math.max(1, journal_page)
 
     -- Cancel any pending debounced POST.
     if self._progress_post_func then
@@ -3554,7 +3563,7 @@ function KamareImageViewer:_postViewProgress(force)
         end
         UIManager:scheduleIn(2.0, self._progress_post_func)
     end
-    self.last_posted_page = page_to_post
+    self.last_posted_page = journal_page
 end
 
 function KamareImageViewer:onClose()
