@@ -53,8 +53,9 @@ plugin can drive.
 
 - **Versioned facade**: `require("kamarecache")` exposes `API_VERSION = 1` plus
   a `capabilities` table (`status`, `summary`, `enqueue`, `delete`, `server`,
-  `resume`, `queue`, `queue_control`, `index`, `open`, `estimate`). New
-  capabilities are additive; only a breaking change bumps the major version.
+  `resume`, `queue`, `queue_control`, `index`, `open`, `estimate`, `chapters`,
+  `delete_all`). New capabilities are additive; only a breaking change bumps
+  the major version.
 - **Safe probing**: callers use `pcall(require, "kamarecache")`; a missing
   module, another major version, or a missing capability degrades silently
   instead of raising, and one absent capability only disables that feature.

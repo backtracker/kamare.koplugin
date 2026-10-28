@@ -84,6 +84,7 @@ return function(t)
     t.eq(#entries, 1, "rebuild finds chapter")
     t.eq(entries[1].chapterId, cid, "index chapter id")
     t.eq(entries[1].pagesBytes, 120, "index pagesBytes")
+    t.eq(entries[1].pagesReadSnapshot, 1, "index keeps the frozen pagesRead snapshot")
     t.eq(entries[1].stale, false, "index stale default")
 
     -- stale survives rebuild

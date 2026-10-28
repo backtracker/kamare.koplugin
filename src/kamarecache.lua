@@ -421,7 +421,7 @@ local function map_entry(base_url, key, entry, series_hint)
         archiveExt = entry.archiveExt,
         koreaderHash = entry.koreaderHash or entry.koreader_hash,
         files = files,
-        pagesReadSnapshot = entry.pagesReadSnapshot or entry.pages_read,
+        pagesReadSnapshot = entry.pagesReadSnapshot or entry.pages_read or entry.pagesRead,
         seriesChapters = entry.seriesChapters or entry.series_chapters,
     }
 end

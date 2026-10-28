@@ -38,7 +38,7 @@ local function fake_client(opts)
         return {
             pages = opts.pages or 3,
             volumeId = 10, seriesId = 20, libraryId = 30,
-            pagesRead = 0,
+            pagesRead = opts.pagesRead or 0,
             files = opts.files or { { bytes = 1000, koreaderHash = "HASH", filePath = "x.cbz" } },
         }
     end
@@ -216,7 +216,7 @@ return function(t)
     -- happy path: download -> extract -> meta/index/series, standby paired
     do
         local arch = fake_archive()
-        local q, store, settings, scheduler, ui = make(t, { archive = arch })
+        local q, store, settings, scheduler, ui = make(t, { archive = arch, client_opts = { pagesRead = 2 } })
         local ok = q:enqueue({ entry() }, { confirm = function() return true end })
         t.ok(ok, "enqueue succeeds")
         scheduler:pump()
@@ -224,10 +224,12 @@ return function(t)
         t.ok(meta ~= nil, "meta written after download")
         t.eq(meta and meta.source, "archive", "meta source archive")
         t.eq(meta and meta.pages, 3, "meta pages")
+        t.eq(meta and meta.pagesReadSnapshot, 2, "meta freezes server progress")
         t.eq(meta and meta.dims[2][2], 150, "meta dims")
         t.eq(meta and meta.pageExts[1], "jpg", "meta page extension")
         t.eq(meta and meta.fingerprint, "3:1000:HASH", "meta fingerprint")
         t.eq(#store:read_index("srv1"), 1, "index entry written")
+        t.eq(store:read_index("srv1")[1].pagesReadSnapshot, 2, "index keeps the frozen snapshot")
         t.ok(not store:exists(store:part_path("srv1", 100)), "part deleted")
         t.eq(#q.entries, 0, "queue drained")
         t.eq(q.state, "idle", "queue idle")

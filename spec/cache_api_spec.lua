@@ -178,29 +178,83 @@ local function cleanup_spec(t)
     meta(cp_store, 1, { pages = 100, pagesReadSnapshot = 100 })
     meta(cp_store, 2, { pages = 100 })
     meta(cp_store, 3, { pages = 100, seriesId = 21, seriesName = "Other" })
+    meta(cp_store, 4, { pages = 100, pagesReadSnapshot = 99 })
+    meta(cp_store, 5, { pages = 0, pagesReadSnapshot = 0 })
+    meta(cp_store, 6, { pages = 100, stale = true })
     cp_journal:set_position({
         serverKey = "k1", chapterId = 2, seriesId = 20, libraryId = 10, volumeId = 30,
         seriesName = "Series", chapterTitle = "Ch2",
     }, 100, { source = "offline", force = true })
+    cp_journal:set_position({
+        serverKey = "k1", chapterId = 4, seriesId = 20, libraryId = 10, volumeId = 30,
+        seriesName = "Series", chapterTitle = "Ch4",
+    }, 50, { source = "offline", force = true })
     local cp_queue = { contains = function(__, ___, id) return id == 3 end }
     Cache.set_context{
         store = cp_store, settings = cp_settings, journal = cp_journal,
         queue = cp_queue, client = {},
     }
 
+    -- read-only guarantee: a valid index is not rewritten, settings are not
+    -- flushed and the journal file is byte-identical after the plan is built.
+    local cp_writes = 0
+    local cp_write_index = cp_store.write_index
+    cp_store.write_index = function(self2, key, entries)
+        cp_writes = cp_writes + 1
+        return cp_write_index(self2, key, entries)
+    end
+    local function read_file(path)
+        local f = io.open(path, "rb")
+        if not f then return nil end
+        local data = f:read("*a")
+        f:close()
+        return data
+    end
+    local cp_journal_before = read_file(cp_journal:path())
+
     local plan = Cache.chapters("https://example")
-    t.eq(#plan, 3, "chapters lists every cached chapter")
+    t.eq(cp_writes, 0, "chapters does not rewrite a valid index")
+    t.eq(cp_settings.saved, 0, "chapters does not save settings")
+    t.eq(cp_settings.flushed, 0, "chapters does not flush settings")
+    t.eq(read_file(cp_journal:path()), cp_journal_before, "chapters does not write the journal")
+
+    t.eq(#plan, 6, "chapters lists every cached chapter")
     local by_id_plan = {}
     for __, c in ipairs(plan) do by_id_plan[c.chapterId] = c end
     t.ok(by_id_plan[1].read, "snapshot progress marks a chapter read")
     t.ok(by_id_plan[2].read, "journal progress marks a chapter read")
     t.ok(not by_id_plan[3].read, "a chapter with no progress is not read")
     t.ok(by_id_plan[3].queued, "queued state comes from the queue")
+    t.ok(not by_id_plan[4].read, "journal progress below the page count is not read")
+    t.ok(not by_id_plan[5].read, "a chapter with no page count is not read")
+    t.ok(by_id_plan[6].stale, "the stale flag is passed through")
     t.eq(by_id_plan[1].bytes, 5200, "bytes use pagesBytes")
     t.eq(by_id_plan[1].snapshot, 100, "snapshot is returned for explanations")
+    t.eq(by_id_plan[4].journalPage, 50, "journal page is returned for explanations")
     t.is_nil(by_id_plan[1].volumeId, "the plan does not pretend to know volumeId")
     t.eq(#Cache.chapters("https://example", 21), 1, "series filter keeps one series")
     t.eq(Cache.chapters("https://example", 21)[1].chapterId, 3, "series filter picks the right rows")
+
+    -- open is mirrored from the viewer, conservatively when it has no cache key
+    local function find_plan(id)
+        for __, c in ipairs(Cache.chapters("https://example")) do
+            if c.chapterId == id then return c end
+        end
+    end
+    package.loaded["kamareimageviewer"] = {
+        active_instance = { metadata = { chapterId = 3 }, cache_server_key = "k1" },
+    }
+    t.ok(find_plan(3).open, "the open chapter is flagged")
+    t.ok(not find_plan(1).open, "other chapters are not flagged open")
+    package.loaded["kamareimageviewer"] = {
+        active_instance = { metadata = { chapterId = 1 } },
+    }
+    t.ok(find_plan(1).open, "a viewer with no cache key still blocks its chapter")
+    package.loaded["kamareimageviewer"] = {
+        active_instance = { metadata = { chapterId = 3 }, cache_server_key = "k2" },
+    }
+    t.ok(not find_plan(3).open, "a viewer on another server does not flag this plan")
+    package.loaded["kamareimageviewer"] = nil
 
     local __, unknown_code = Cache.chapters("https://unknown")
     t.eq(unknown_code, "unknown_server", "an unknown server is reported")
@@ -209,6 +263,11 @@ local function cleanup_spec(t)
     t.eq(#Cache.chapters("https://empty"), 0, "a registered server with no cache has an empty plan")
     t.ok(not cp_store:exists(cp_store:server_root("k2")),
         "chapters never creates a cache directory for a server")
+
+    -- an existing server directory may rebuild a missing derived index
+    os.remove(cp_store:index_path("k1"))
+    t.eq(#Cache.chapters("https://example"), 6, "an existing server rebuilds a missing index")
+    t.eq(cp_writes, 1, "the rebuild is the only index write")
 
     -- ---- delete_all: every server, queue by entry, one save --------------
     local da_dir = t.tmpdir()
@@ -252,6 +311,7 @@ local function cleanup_spec(t)
     local da_ok, da_code, da_result = Cache.delete_all()
     t.ok(da_ok, "delete_all succeeds: " .. tostring(da_code))
     t.eq(da_result and da_result.chapters, 2, "delete_all reports chapters before deleting")
+    t.ok(da_result and da_result.bytes > 0, "delete_all reports the freed-byte estimate")
     t.eq(#da_store:list_server_keys(), 0, "every server directory is gone, including unlinked")
     t.ok(da_store:exists(da_store:cache_root()), "the cache root itself is kept")
     t.eq(da_settings.data.servers[1].key, "k1", "settings server entries are kept")
@@ -273,6 +333,14 @@ local function cleanup_spec(t)
     t.ok(da_store:exists(da_store:server_root("k1")), "a refused wipe leaves the cache alone")
     package.loaded["kamareimageviewer"] = nil
 
+    -- a silent remove_tree failure is caught by the post-delete directory check
+    local da_list = da_store.list_server_keys
+    da_store.list_server_keys = function() return { "k1" } end
+    local inc_ok, inc_code = Cache.delete_all()
+    t.is_nil(inc_ok, "delete_all reports a surviving server directory")
+    t.eq(inc_code, "delete_incomplete", "delete_all reports delete_incomplete")
+    da_store.list_server_keys = da_list
+
     -- ---- bulk delete: one index write, one queue save --------------------
     local bd_dir = t.tmpdir()
     local bd_store = Store:new{ data_dir = bd_dir }
@@ -288,17 +356,8 @@ local function cleanup_spec(t)
         bd_writes = bd_writes + 1
         return bd_write_index(self2, key, entries)
     end
-    local bd_queue = {
-        entries = { { serverKey = "k1", chapterId = 21 }, { serverKey = "k1", chapterId = 22 } },
-        paused = true, saved = 0,
-    }
-    function bd_queue:contains() return true end
-    function bd_queue:abort_many(list)
-        self.entries = {}
-        return #list
-    end
-    function bd_queue:save() self.saved = self.saved + 1 end
-    function bd_queue:_changed() end
+    local bd_queue = Queue:new{ store = bd_store, settings = bd_settings, scheduler = fake_scheduler() }
+    bd_queue.entries = { { serverKey = "k1", chapterId = 21 }, { serverKey = "k1", chapterId = 22 } }
     Cache.set_context{
         store = bd_store, settings = bd_settings, journal = bd_journal,
         queue = bd_queue, client = {},
@@ -307,6 +366,9 @@ local function cleanup_spec(t)
     t.ok(bd_ok, "bulk delete succeeds")
     t.eq(bd_count, 2, "duplicate ids are counted once")
     t.eq(bd_writes, 1, "the index is rewritten once for the whole batch")
+    t.eq(bd_settings.saved, 1, "the queue is saved once for the whole batch")
+    t.eq(bd_settings.flushed, 1, "the queue is flushed once for the whole batch")
+    t.eq(#bd_queue.entries, 0, "every batch entry is aborted")
     t.ok(not bd_store:exists(bd_store:chapter_dir("k1", 20, 21)), "first chapter removed")
     t.ok(not bd_store:exists(bd_store:chapter_dir("k1", 20, 22)), "second chapter removed")
     t.ok(bd_store:exists(bd_store:chapter_dir("k1", 20, 23)), "untouched chapter stays")
@@ -940,19 +1002,22 @@ return function(t)
         chapters = {
             [300] = { pages = 3, volumeId = 30, seriesId = 20, libraryId = 10, pagesRead = 0,
                 files = { { bytes = 1000, koreaderHash = "H", filePath = "x.cbz" } } },
-            [301] = { pages = 3, volumeId = 30, seriesId = 20, libraryId = 10, pagesRead = 0,
+            [301] = { pages = 3, volumeId = 30, seriesId = 20, libraryId = 10, pagesRead = 3,
                 files = { { bytes = 1000, koreaderHash = "H", filePath = "x.cbz" } } },
         },
     })
+    local dl_journal = Journal:new{ settings_dir = dl_dir }
+    dl_journal:load()
     Cache.set_context(nil)
     Cache.set_context{
         store = dl_store, settings = dl_settings, client = dl_client, queue = dl_queue,
+        journal = dl_journal,
     }
     t.ok(Cache.enqueue("https://example", {
         { chapterId = 300, seriesId = 20, volumeId = 30, libraryId = 10, pages = 3,
-          archiveBytes = 1000, files = {} },
+          archiveBytes = 1000, pagesRead = 0, files = {} },
         { chapterId = 301, seriesId = 20, volumeId = 30, libraryId = 10, pages = 3,
-          archiveBytes = 1000, files = {} },
+          archiveBytes = 1000, pagesRead = 3, files = {} },
     }), "two chapters enqueued")
     dl_scheduler:pump()
     t.eq(dl_queue.current and dl_queue.current.chapterId, 300, "first chapter is downloading")
@@ -964,6 +1029,16 @@ return function(t)
     t.ok(dl_store:has_meta("k1", 20, 301), "the next chapter downloads after the cancel")
     t.eq(dl_queue.state, "idle", "queue goes idle after the last chapter")
     t.is_nil(dl_queue.current, "no current entry left")
+
+    -- the frozen server progress survives into meta/index, so a read chapter
+    -- is visible to the cleanup plan without re-reading its meta.json.
+    local dl_meta = dl_store:read_meta("k1", 20, 301)
+    t.eq(dl_meta and dl_meta.pagesReadSnapshot, 3, "meta freezes server progress")
+    local dl_index = dl_store:read_index("k1")
+    t.eq(dl_index[1] and dl_index[1].pagesReadSnapshot, 3, "index carries the frozen snapshot")
+    local dl_plan = Cache.chapters("https://example")
+    t.eq(#dl_plan, 1, "the cleanup plan sees the downloaded chapter")
+    t.ok(dl_plan[1].read, "snapshot alone marks a downloaded chapter read")
 
     Cache.set_context{
         store = store, settings = settings, journal = journal, queue = queue,
