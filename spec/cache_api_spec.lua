@@ -34,6 +34,14 @@ local function fake_queue()
         self.aborted[#self.aborted + 1] = chapter_id
         return true
     end
+    function q:abort_many(list)
+        for __, item in ipairs(list or {}) do
+            if self:contains(item.serverKey, item.chapterId) then
+                self.aborted[#self.aborted + 1] = item.chapterId
+            end
+        end
+        return #self.aborted
+    end
     function q:enqueue(entries, opts)
         self.enqueued = entries
         self.opts = opts
@@ -60,6 +68,7 @@ local function meta(store, chapter_id, extra)
         seriesId = series_id, seriesName = series_name, chapterId = chapter_id,
         chapterTitle = m.chapterTitle, order = chapter_id, pages = m.pages,
         archiveBytes = m.archiveBytes, pagesBytes = m.pagesBytes,
+        pagesReadSnapshot = m.pagesReadSnapshot,
         stale = extra.stale and true or false,
         cachedAt = 1,
     }))
@@ -158,12 +167,159 @@ local function real_queue(store, settings, opts)
     return queue, scheduler, client
 end
 
+local function cleanup_spec(t)
+
+    -- ---- chapters: read-only cleanup plan --------------------------------
+    local cp_dir = t.tmpdir()
+    local cp_store = Store:new{ data_dir = cp_dir }
+    local cp_settings = fake_settings()
+    local cp_journal = Journal:new{ settings_dir = cp_dir }
+    cp_journal:load()
+    meta(cp_store, 1, { pages = 100, pagesReadSnapshot = 100 })
+    meta(cp_store, 2, { pages = 100 })
+    meta(cp_store, 3, { pages = 100, seriesId = 21, seriesName = "Other" })
+    cp_journal:set_position({
+        serverKey = "k1", chapterId = 2, seriesId = 20, libraryId = 10, volumeId = 30,
+        seriesName = "Series", chapterTitle = "Ch2",
+    }, 100, { source = "offline", force = true })
+    local cp_queue = { contains = function(__, ___, id) return id == 3 end }
+    Cache.set_context{
+        store = cp_store, settings = cp_settings, journal = cp_journal,
+        queue = cp_queue, client = {},
+    }
+
+    local plan = Cache.chapters("https://example")
+    t.eq(#plan, 3, "chapters lists every cached chapter")
+    local by_id_plan = {}
+    for __, c in ipairs(plan) do by_id_plan[c.chapterId] = c end
+    t.ok(by_id_plan[1].read, "snapshot progress marks a chapter read")
+    t.ok(by_id_plan[2].read, "journal progress marks a chapter read")
+    t.ok(not by_id_plan[3].read, "a chapter with no progress is not read")
+    t.ok(by_id_plan[3].queued, "queued state comes from the queue")
+    t.eq(by_id_plan[1].bytes, 5200, "bytes use pagesBytes")
+    t.eq(by_id_plan[1].snapshot, 100, "snapshot is returned for explanations")
+    t.is_nil(by_id_plan[1].volumeId, "the plan does not pretend to know volumeId")
+    t.eq(#Cache.chapters("https://example", 21), 1, "series filter keeps one series")
+    t.eq(Cache.chapters("https://example", 21)[1].chapterId, 3, "series filter picks the right rows")
+
+    local __, unknown_code = Cache.chapters("https://unknown")
+    t.eq(unknown_code, "unknown_server", "an unknown server is reported")
+
+    cp_settings.data.servers[2] = { name = "E", kavita_url = "https://empty", key = "k2", api_key = "k" }
+    t.eq(#Cache.chapters("https://empty"), 0, "a registered server with no cache has an empty plan")
+    t.ok(not cp_store:exists(cp_store:server_root("k2")),
+        "chapters never creates a cache directory for a server")
+
+    -- ---- delete_all: every server, queue by entry, one save --------------
+    local da_dir = t.tmpdir()
+    local da_store = Store:new{ data_dir = da_dir }
+    local da_settings = fake_settings()
+    local da_journal = Journal:new{ settings_dir = da_dir }
+    da_journal:load()
+    meta(da_store, 11)
+    meta(da_store, 990, { serverKey = "k9", seriesId = 99, seriesName = "Unlinked" })
+    assert(da_store:ensure_dir(da_store:incoming_dir("k7")))
+    assert(da_store:write_file_atomic(da_store:part_path("k7", 700), string.rep("x", 10)))
+
+    local da_queue = {
+        entries = {
+            { serverKey = "k1", chapterId = 11 },
+            { serverKey = "k9", chapterId = 990 },
+            { serverKey = "k7", chapterId = 700 },
+        },
+        state = "downloading", paused = false, saved = 0, aborted = {},
+    }
+    function da_queue:pause(reason)
+        self.paused = true
+        self.paused_with = reason
+        self.pause_reason = reason
+        self.state = "paused"
+    end
+    function da_queue:abort_many(list)
+        for __, item in ipairs(list or {}) do
+            self.aborted[#self.aborted + 1] = item.serverKey .. ":" .. item.chapterId
+        end
+        self.entries = {}
+        return #self.aborted
+    end
+    function da_queue:save() self.saved = self.saved + 1 end
+    function da_queue:_changed() end
+    Cache.set_context{
+        store = da_store, settings = da_settings, journal = da_journal,
+        queue = da_queue, client = {},
+    }
+
+    local da_ok, da_code, da_result = Cache.delete_all()
+    t.ok(da_ok, "delete_all succeeds: " .. tostring(da_code))
+    t.eq(da_result and da_result.chapters, 2, "delete_all reports chapters before deleting")
+    t.eq(#da_store:list_server_keys(), 0, "every server directory is gone, including unlinked")
+    t.ok(da_store:exists(da_store:cache_root()), "the cache root itself is kept")
+    t.eq(da_settings.data.servers[1].key, "k1", "settings server entries are kept")
+    t.eq(#da_queue.entries, 0, "every queue entry was aborted")
+    t.eq(da_queue.paused_with, "user", "the queue is paused before the wipe")
+    t.is_nil(da_queue.pause_reason, "the paused reason is cleared after the wipe")
+    t.eq(da_queue.state, "idle", "the queue is left idle")
+    t.eq(da_queue.saved, 1, "the queue is saved once")
+
+    -- an open viewer refuses the whole wipe before touching anything
+    meta(da_store, 12)
+    da_queue.entries = { { serverKey = "k1", chapterId = 12 } }
+    package.loaded["kamareimageviewer"] = {
+        active_instance = { metadata = { chapterId = 12 }, cache_server_key = "k1" },
+    }
+    local open_ok, open_code = Cache.delete_all()
+    t.is_nil(open_ok, "delete_all refuses while a chapter is open")
+    t.eq(open_code, "chapter_open", "delete_all reports chapter_open")
+    t.ok(da_store:exists(da_store:server_root("k1")), "a refused wipe leaves the cache alone")
+    package.loaded["kamareimageviewer"] = nil
+
+    -- ---- bulk delete: one index write, one queue save --------------------
+    local bd_dir = t.tmpdir()
+    local bd_store = Store:new{ data_dir = bd_dir }
+    local bd_settings = fake_settings()
+    local bd_journal = Journal:new{ settings_dir = bd_dir }
+    bd_journal:load()
+    meta(bd_store, 21)
+    meta(bd_store, 22)
+    meta(bd_store, 23)
+    local bd_writes = 0
+    local bd_write_index = bd_store.write_index
+    bd_store.write_index = function(self2, key, entries)
+        bd_writes = bd_writes + 1
+        return bd_write_index(self2, key, entries)
+    end
+    local bd_queue = {
+        entries = { { serverKey = "k1", chapterId = 21 }, { serverKey = "k1", chapterId = 22 } },
+        paused = true, saved = 0,
+    }
+    function bd_queue:contains() return true end
+    function bd_queue:abort_many(list)
+        self.entries = {}
+        return #list
+    end
+    function bd_queue:save() self.saved = self.saved + 1 end
+    function bd_queue:_changed() end
+    Cache.set_context{
+        store = bd_store, settings = bd_settings, journal = bd_journal,
+        queue = bd_queue, client = {},
+    }
+    local bd_ok, __, bd_count = Cache.delete("https://example", { 21, 22, 21 })
+    t.ok(bd_ok, "bulk delete succeeds")
+    t.eq(bd_count, 2, "duplicate ids are counted once")
+    t.eq(bd_writes, 1, "the index is rewritten once for the whole batch")
+    t.ok(not bd_store:exists(bd_store:chapter_dir("k1", 20, 21)), "first chapter removed")
+    t.ok(not bd_store:exists(bd_store:chapter_dir("k1", 20, 22)), "second chapter removed")
+    t.ok(bd_store:exists(bd_store:chapter_dir("k1", 20, 23)), "untouched chapter stays")
+
+
+end
+
 return function(t)
     Cache.set_context(nil)
 
     t.eq(Cache.api_version, 1, "api version")
     for __, cap in ipairs({ "status", "summary", "enqueue", "delete", "server", "resume",
-        "queue", "queue_control", "index", "open", "estimate" }) do
+        "queue", "queue_control", "index", "open", "estimate", "chapters", "delete_all" }) do
         t.ok(Cache.capabilities[cap], "capability " .. cap)
     end
 
@@ -969,6 +1125,9 @@ return function(t)
     t.eq(closed and closed.page, 5, "the position written on close is readable")
     t.eq(closed and closed.source, "journal", "close records a journal-sourced position")
     package.loaded["kamareimageviewer"] = nil
+
+
+    cleanup_spec(t)
 
     Cache.set_context(nil)
     t.is_nil(Cache.get_context(), "set_context(nil) resets for the next spec")

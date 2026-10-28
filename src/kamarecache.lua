@@ -5,9 +5,11 @@ Contract (API_VERSION = 1):
   cache.api_version            -> 1
   cache.capabilities           -> { status, summary, enqueue, delete, server,
                                     resume, queue, queue_control, index, open,
-                                    estimate }
+                                    estimate, chapters, delete_all }
   cache.status(base_url, id)   -> nil | { state = "partial"|"complete"|"stale", bytes, total }
   cache.summary(base_url)      -> { used, available, chapters }
+  cache.chapters(base_url, series_id?) -> array of per-chapter cleanup facts
+  cache.delete_all()           -> true, nil, { chapters, bytes } | nil, code, message
   cache.register_server{ name?, base_url, api_key } -> serverKey | nil, code, message
   cache.resume_page(base_url, chapter_id, series_id?) -> { page, source, status, updated_at } | nil
   cache.enqueue(base_url, entries, opts) -> true | nil, code, message
@@ -66,6 +68,8 @@ Cache.capabilities = {
     index = true,         -- index
     open = true,          -- open
     estimate = true,      -- estimate
+    chapters = true,      -- chapters (read-only cleanup plan)
+    delete_all = true,    -- delete_all (every server, including unlinked)
 }
 
 local context
@@ -704,6 +708,56 @@ local function open_chapter()
     return chapter_id, active.cache_server_key
 end
 
+-- Read-only cleanup plan for one server. Ordered like the index
+-- (seriesName, order, chapterId). A server with no cache directory on disk is
+-- an empty plan and never gets a directory created for it; an existing server
+-- may have its derived index rebuilt (same contract as index()).
+--
+-- `read` is journal ∪ snapshot only: the server's pagesRead is not available
+-- offline, so the caller ORs in its own TOC progress. `bytes` is per-chapter
+-- (pagesBytes or archiveBytes); it never adds up to summary.used, which also
+-- counts covers and `.incoming`.
+function Cache.chapters(base_url, series_id)
+    local ctx, key, code, message = server_context(base_url)
+    if not ctx then return nil, code, message end
+    ctx = ensure_read()
+    ctx = ensure_queue()
+
+    if not ctx.store:exists(ctx.store:server_root(key)) then return {} end
+
+    local wanted = series_id ~= nil and tostring(series_id) or nil
+    local open_id, open_key = open_chapter()
+    local out = {}
+    for __, entry in ipairs(ctx.store:load_index_or_rebuild(key)) do
+        if wanted == nil or tostring(entry.seriesId) == wanted then
+            local id = tonumber(entry.chapterId) or entry.chapterId
+            local pos = ctx.journal:get_position(key, id)
+            local journal_page = pos and tonumber(pos.pageNum) or nil
+            local snapshot = tonumber(entry.pagesReadSnapshot)
+            local pages = tonumber(entry.pages) or 0
+            out[#out + 1] = {
+                chapterId = id,
+                seriesId = entry.seriesId,
+                seriesName = entry.seriesName,
+                chapterTitle = entry.chapterTitle,
+                chapterNumber = entry.chapterNumber,
+                order = entry.order,
+                pages = pages,
+                bytes = tonumber(entry.pagesBytes) or tonumber(entry.archiveBytes) or 0,
+                read = CacheUtil.is_read(journal_page, snapshot, nil, pages),
+                stale = entry.stale == true,
+                queued = ctx.queue:contains(key, id),
+                open = open_id ~= nil and id == open_id
+                    and (open_key == nil or open_key == key),
+                journalPage = journal_page,
+                snapshot = snapshot,
+                cachedAt = entry.cachedAt,
+            }
+        end
+    end
+    return out
+end
+
 -- Write: deletes cached chapters (files + part + queue entry). Never the journal.
 function Cache.delete(base_url, chapter_ids)
     local ctx, key, code, message = server_context(base_url)
@@ -732,26 +786,72 @@ function Cache.delete(base_url, chapter_ids)
         by_id[entry.chapterId] = entry
     end
 
-    local deleted = 0
+    -- Deduplicate first: the old loop counted a duplicate id twice.
+    local ids, seen = {}, {}
     for __, chapter_id in ipairs(chapter_ids) do
         local id = tonumber(chapter_id) or chapter_id
-        local entry = by_id[id]
-        local part = ctx.store:part_path(key, id)
-        -- Capture this before abort: abort removes the .part now, and the
-        -- "deleted" count keeps its old meaning (an index entry or bytes on
-        -- disk were actually removed).
-        local had_part = ctx.store:file_size(part) > 0
-        if ctx.queue:contains(key, id) then ctx.queue:abort(key, id) end
-        if entry then
-            ctx.store:delete_chapter(key, entry.seriesId, id)
-            deleted = deleted + 1
-        else
-            os.remove(part)
-            ctx.store:remove_index_chapter(key, nil, id)
-            if had_part then deleted = deleted + 1 end
+        local identity = tostring(id)
+        if not seen[identity] then
+            seen[identity] = true
+            ids[#ids + 1] = id
         end
     end
+
+    local queue_list, store_list = {}, {}
+    for __, id in ipairs(ids) do
+        local entry = by_id[id]
+        local part_bytes = ctx.store:file_size(ctx.store:part_path(key, id))
+        queue_list[#queue_list + 1] = { serverKey = key, chapterId = id }
+        store_list[#store_list + 1] = {
+            serverKey = key,
+            chapterId = id,
+            seriesId = entry and entry.seriesId or nil,
+            partBytes = part_bytes,
+        }
+    end
+
+    -- One queue save and one index rewrite for the whole batch (cleanup of a
+    -- series or every read chapter can be hundreds of ids).
+    ctx.queue:abort_many(queue_list)
+    local _freed, deleted = ctx.store:delete_chapters(store_list)
     return true, nil, deleted
+end
+
+-- Write: clears every server's cache, including server keys that are no longer
+-- in settings ("unlinked"). The `cache/` root, the server entries in settings
+-- and the reading journal are kept. Aborts by queue entry, not by disk
+-- directory: a server key that was queued before anything landed on disk must
+-- not survive the wipe and rebuild its directory.
+function Cache.delete_all()
+    local open_id = open_chapter()
+    if open_id then
+        return nil, "chapter_open", _("This chapter is open; close it first")
+    end
+
+    local ctx = ensure_queue()
+    ctx.queue:pause("user")
+
+    local entries = {}
+    for __, entry in ipairs(ctx.queue.entries or {}) do
+        entries[#entries + 1] = { serverKey = entry.serverKey, chapterId = entry.chapterId }
+    end
+    if #entries > 0 then ctx.queue:abort_many(entries) end
+
+    local freed, count = ctx.store:delete_all()
+
+    -- remove_tree() failures are silent all the way down; a surviving server
+    -- directory is the only observable signal.
+    local left = ctx.store:list_server_keys()
+    if #left > 0 then
+        return nil, "delete_incomplete", _("Some cache files could not be deleted")
+    end
+
+    ctx.queue.state = "idle"
+    ctx.queue.pause_reason = nil
+    ctx.queue.completed_bytes = 0
+    ctx.queue:save()
+    ctx.queue:_changed()
+    return true, nil, { chapters = count, bytes = freed }
 end
 
 local function is_offline(ctx)

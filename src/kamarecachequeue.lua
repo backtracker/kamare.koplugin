@@ -477,6 +477,44 @@ function Queue:abort(server_key, chapter_id)
     return true
 end
 
+-- Bulk abort for cache cleanup: removes every matching entry (and its `.part`)
+-- with a single save. A removed current entry reschedules the next one unless
+-- the queue is paused, so bulk deleting while downloads keep running is safe.
+function Queue:abort_many(list)
+    local removed, removed_current = 0, false
+    for __, item in ipairs(list or {}) do
+        local i, entry = self:_entry_index(item.serverKey, item.chapterId)
+        if i then
+            if self.current == entry then
+                if self._handle then
+                    pcall(function() self._handle.cancel() end)
+                    self._handle = nil
+                end
+                self.current = nil
+                self:_standby_off()
+                removed_current = true
+            end
+            os.remove(self.store:part_path(item.serverKey, item.chapterId))
+            table.remove(self.entries, i)
+            removed = removed + 1
+        end
+    end
+    if removed > 0 then
+        if removed_current then
+            if #self.entries == 0 then
+                self.state = "idle"
+                self.completed_bytes = 0
+            elseif not self.paused then
+                self.state = "queued"
+                self:_schedule(0)
+            end
+        end
+        self:save()
+        self:_changed()
+    end
+    return removed
+end
+
 function Queue:remove(server_key, chapter_id)
     return self:cancel(server_key, chapter_id)
 end
@@ -876,6 +914,7 @@ function Queue:_write_chapter(entry, data)
         pages = data.pages,
         archiveBytes = data.archiveBytes,
         pagesBytes = data.pagesBytes,
+        pagesReadSnapshot = entry.pagesReadSnapshot,
         state = "complete",
         stale = false,
         cachedAt = self.clock(),

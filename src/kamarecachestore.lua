@@ -311,6 +311,9 @@ local function meta_to_index_entry(meta, stale)
         pages = meta.pages,
         archiveBytes = meta.archiveBytes,
         pagesBytes = meta.pagesBytes,
+        -- Frozen server progress at download time. Kept in the derived index so
+        -- the cleanup plan can judge "read" without reading every meta.json.
+        pagesReadSnapshot = meta.pagesReadSnapshot,
         state = meta.state or "complete",
         stale = stale and true or false,
         cachedAt = meta.cachedAt,
@@ -531,12 +534,81 @@ function Store:delete_all()
     return freed, count
 end
 
+-- Bulk delete: one index read/write per server. Items are
+-- `{ serverKey, seriesId?, chapterId }`; the series is resolved from the index
+-- when the caller does not know it. A chapter counts as removed when it had an
+-- index entry or bytes on disk (same meaning as the per-chapter path), so a
+-- queued-but-never-written chapter does not inflate the count. Duplicate ids
+-- inside one server are ignored.
 function Store:delete_chapters(list)
     local freed, count = 0, 0
+    local groups, order = {}, {}
     for _, item in ipairs(list or {}) do
-        freed = freed + self:delete_chapter(item.serverKey, item.seriesId, item.chapterId)
-        count = count + 1
+        local key = item.serverKey
+        if key then
+            local group = groups[key]
+            if not group then
+                group = { items = {}, seen = {} }
+                groups[key] = group
+                order[#order + 1] = key
+            end
+            local id = tonumber(item.chapterId) or item.chapterId
+            if id ~= nil then
+                local dedupe = tostring(item.seriesId) .. "\0" .. tostring(id)
+                if not group.seen[dedupe] then
+                    group.seen[dedupe] = true
+                    group.items[#group.items + 1] = {
+                        seriesId = item.seriesId,
+                        chapterId = id,
+                        partBytes = item.partBytes,
+                    }
+                end
+            end
+        end
     end
+
+    for _, key in ipairs(order) do
+        local group = groups[key]
+        local entries = self:read_index(key) or {}
+        local by_id = {}
+        for _, entry in ipairs(entries) do by_id[entry.chapterId] = entry end
+        local removed, removed_ids = {}, {}
+
+        for _, item in ipairs(group.items) do
+            local entry = by_id[item.chapterId]
+            local series_id = item.seriesId or (entry and entry.seriesId)
+            local had_bytes = false
+            if series_id ~= nil then
+                local cdir = self:chapter_dir(key, series_id, item.chapterId)
+                local size = size_of_tree(cdir)
+                if size > 0 then had_bytes = true end
+                freed = freed + size
+                remove_tree(cdir)
+            end
+            local part = self:part_path(key, item.chapterId)
+            -- The caller may have aborted the queue first, which already
+            -- removed the .part; `partBytes` keeps the freed/count estimate
+            -- truthful without touching anything after the fact.
+            local part_size = math.max(self:file_size(part), tonumber(item.partBytes) or 0)
+            if part_size > 0 then had_bytes = true end
+            freed = freed + part_size
+            os.remove(part)
+            if entry then
+                removed_ids[tostring(item.chapterId)] = true
+                removed[#removed + 1] = item.chapterId
+            end
+            if entry or had_bytes then count = count + 1 end
+        end
+
+        if #removed > 0 then
+            local kept = {}
+            for _, entry in ipairs(entries) do
+                if not removed_ids[tostring(entry.chapterId)] then kept[#kept + 1] = entry end
+            end
+            self:write_index(key, kept)
+        end
+    end
+
     return freed, count
 end
 
