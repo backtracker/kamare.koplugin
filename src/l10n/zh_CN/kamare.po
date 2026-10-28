@@ -637,7 +637,10 @@ msgid "Cache limit set to %1 MB"
 msgstr "缓存上限已设为 %1 MB"
 
 msgid "Cache next N volumes"
-msgstr "缓存往后 N 卷"
+msgstr "缓存后 N 卷"
+
+msgid "Cache next N volumes…"
+msgstr "缓存后 N 卷…"
 
 msgid "Cache series"
 msgstr "缓存系列"
@@ -785,9 +788,6 @@ msgstr "解包中"
 
 msgid "Extracting…"
 msgstr "解包中…"
-
-msgid "From current progress"
-msgstr "从当前进度到结尾"
 
 msgid "Go browse"
 msgstr "去浏览"

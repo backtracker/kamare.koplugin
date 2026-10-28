@@ -779,26 +779,24 @@ function KavitaBrowser:_showSeriesDownloadDialog()
                 self:_confirmAndEnqueue(self:_cacheEntriesFor(unread))
             end,
         },
-        {
-            text = _("From current progress"),
-            callback = function()
-                UIManager:close(dialog)
-                local key = self:_serverKeyForCurrent() or ""
-                local start = self:_currentChapterIndex(cache, key) or 1
-                local slice = {}
-                for i = start, #cache do slice[#slice + 1] = cache[i] end
-                self:_confirmAndEnqueue(self:_cacheEntriesFor(slice))
-            end,
-        },
     }}
     table.insert(buttons, {
         {
-            text = _("Next N volumes…"),
+            text = _("Cache next N volumes…"),
             callback = function()
                 UIManager:close(dialog)
+                -- 默认 3 卷；后面不足 3 卷就取剩余卷数（从当前卷之后算）。
+                local key = self:_serverKeyForCurrent() or ""
+                local detail = self.current_series_detail
+                local remaining = 1
+                if detail then
+                    local volumes, start = self:_nextVolumesStart(key, self.current_series_id, detail)
+                    remaining = math.max(1, #volumes - start + 1)
+                end
                 local input
                 input = InputDialog:new{
                     title = _("Cache next N volumes"),
+                    input = tostring(math.min(3, remaining)),
                     input_hint = _("Number of volumes"),
                     input_type = "number",
                     buttons = {{
@@ -819,6 +817,33 @@ function KavitaBrowser:_showSeriesDownloadDialog()
     UIManager:show(dialog)
 end
 
+-- Volumes sorted by number, plus the index the "next N volumes" range starts
+-- at: after the volume currently being read, else after the last cached one.
+function KavitaBrowser:_nextVolumesStart(server_key, series_id, detail)
+    local volumes = {}
+    for __, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
+    table.sort(volumes, function(a, b) return (tonumber(a.number) or 0) < (tonumber(b.number) or 0) end)
+
+    local flattened = {}
+    for i, v in ipairs(volumes) do
+        for __, ch in ipairs(v.chapters or {}) do
+            flattened[#flattened + 1] = { id = ch.id, pagesRead = ch.pagesRead, _volume_index = i }
+        end
+    end
+    local current = self:_currentChapterIndex(flattened, server_key)
+    if current then return volumes, flattened[current]._volume_index + 1 end
+
+    -- No reading progress: continue after the last volume with cached data.
+    local store = self:_store()
+    local start = 1
+    for i, v in ipairs(volumes) do
+        for __, ch in ipairs(v.chapters or {}) do
+            if store:has_meta(server_key, series_id, ch.id) then start = i + 1 end
+        end
+    end
+    return volumes, start
+end
+
 function KavitaBrowser:_enqueueNextVolumes(n)
     if not n or n <= 0 then return end
     local detail = self.current_series_detail
@@ -826,30 +851,7 @@ function KavitaBrowser:_enqueueNextVolumes(n)
     local key = self:_serverKeyForCurrent()
     local store = self:_store()
     local sid = self.current_series_id
-    local volumes = {}
-    for __, v in ipairs(detail.volumes or {}) do volumes[#volumes + 1] = v end
-    table.sort(volumes, function(a, b) return (tonumber(a.number) or 0) < (tonumber(b.number) or 0) end)
-
-    -- Anchor after the volume currently being read (newest journal position).
-    local flattened = {}
-    for i, v in ipairs(volumes) do
-        for __, ch in ipairs(v.chapters or {}) do
-            flattened[#flattened + 1] = { id = ch.id, pagesRead = ch.pagesRead, _volume_index = i }
-        end
-    end
-    local current = self:_currentChapterIndex(flattened, key)
-    local start
-    if current then
-        start = flattened[current]._volume_index + 1
-    else
-        -- No reading progress: continue after the last volume with cached data.
-        start = 1
-        for i, v in ipairs(volumes) do
-            for __, ch in ipairs(v.chapters or {}) do
-                if store:has_meta(key, sid, ch.id) then start = i + 1 end
-            end
-        end
-    end
+    local volumes, start = self:_nextVolumesStart(key, sid, detail)
 
     -- Pick the next N volumes that still have uncached chapters.
     local chapters, picked = {}, 0
