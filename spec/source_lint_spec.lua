@@ -51,4 +51,15 @@ return function(t)
     check_methods(t, read(src .. "/kamareimageviewer.lua"), "KamareImageViewer", {
         registerTouchZones = true,
     }, "kamareimageviewer")
+
+    -- The next-chapter callback must only fire from `_closeAndNotifyNextChapter`,
+    -- i.e. after the viewer closed and on the next tick. Calling it inline made
+    -- a caller that opens the next chapter (Moon's cache adapter) hit the
+    -- singleton guard and fail with `viewer_running`.
+    local viewer_source = read(src .. "/kamareimageviewer.lua") or ""
+    t.ok(viewer_source:find("function KamareImageViewer:_closeAndNotifyNextChapter", 1, true) ~= nil,
+        "kamareimageviewer: next-chapter hand-off goes through _closeAndNotifyNextChapter")
+    local direct_calls = select(2, viewer_source:gsub("on_next_chapter_callback%s*%(", ""))
+    t.eq(direct_calls, 0,
+        "kamareimageviewer: do not call the next-chapter callback inline (close the viewer first)")
 end

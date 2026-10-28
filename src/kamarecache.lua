@@ -41,6 +41,10 @@ notes (01 A2 / A4), documented once here:
 Capability probing (spec 09): `pcall(require, "kamarecache")` + api_version +
 capabilities. Missing module or a different major version means "no cache UI",
 silently -- never raise at the caller.
+
+Viewer hand-off: `open`'s `on_next` runs after the viewer has closed (the
+handler is notified on the next UI tick), so an `on_next` implementation may
+call `open` for the next chapter directly; it will not hit `viewer_running`.
 --]]
 
 local logger = require("logger")
@@ -611,6 +615,9 @@ end
 
 -- Read-only capacity estimate. Reuses the queue's hydration and space rules;
 -- writes nothing, enqueues nothing, creates no server key (spec 01 A8 / 07 A6).
+-- Sizes must match enqueue exactly, so entries that arrive without them (Moon's
+-- toc rows carry no byte counts) are hydrated with one chapter read each; call
+-- it online, not from an offline screen.
 function Cache.estimate(base_url, entries)
     local ctx, key, code, message = server_context(base_url)
     if not ctx then return nil, code, message end

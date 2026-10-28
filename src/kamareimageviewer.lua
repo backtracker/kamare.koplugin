@@ -3267,6 +3267,19 @@ function KamareImageViewer:_localNextChapter()
     return next_chapter, cached
 end
 
+-- Hand the next chapter to the owner only after this viewer has closed. The
+-- singleton guard in `new` refuses a second viewer, so a callback that opens
+-- the next chapter synchronously (Moon's cache adapter does exactly that) used
+-- to fail with `viewer_running`. Closing first, then notifying on the next
+-- tick, keeps every caller free of its own deferral.
+function KamareImageViewer:_closeAndNotifyNextChapter(chapter_id)
+    local callback = self.on_next_chapter_callback
+    self:onClose()
+    if callback then
+        UIManager:nextTick(function() callback(chapter_id) end)
+    end
+end
+
 function KamareImageViewer:_offerLocalNextChapter()
     local is_auto = self.chapter_end_behavior == 2
     local next_chapter, cached = self:_localNextChapter()
@@ -3305,8 +3318,7 @@ function KamareImageViewer:_offerLocalNextChapter()
     end
 
     if is_auto then
-        if self.on_next_chapter_callback then self.on_next_chapter_callback(next_chapter.id) end
-        self:onClose()
+        self:_closeAndNotifyNextChapter(next_chapter.id)
         return true
     end
 
@@ -3322,8 +3334,7 @@ function KamareImageViewer:_offerLocalNextChapter()
             { text = _("Continue"), callback = function()
                 UIManager:close(self.next_chapter_dialog)
                 self.next_chapter_dialog = nil
-                if self.on_next_chapter_callback then self.on_next_chapter_callback(next_chapter.id) end
-                self:onClose()
+                self:_closeAndNotifyNextChapter(next_chapter.id)
             end },
         }},
     }
@@ -3387,12 +3398,7 @@ function KamareImageViewer:_checkAndOfferNextChapter()
         end
 
         if is_auto then
-            if self.on_next_chapter_callback then
-                self.on_next_chapter_callback(nextChapterId)
-            end
-
-            self:onClose()
-
+            self:_closeAndNotifyNextChapter(nextChapterId)
             return
         end
 
@@ -3414,10 +3420,7 @@ function KamareImageViewer:_checkAndOfferNextChapter()
                         callback = function()
                             UIManager:close(self.next_chapter_dialog)
                             self.next_chapter_dialog = nil
-                            if self.on_next_chapter_callback then
-                                self.on_next_chapter_callback(nextChapterId)
-                            end
-                            self:onClose()
+                            self:_closeAndNotifyNextChapter(nextChapterId)
                         end,
                     },
                 },
