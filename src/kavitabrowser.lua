@@ -766,6 +766,21 @@ function KavitaBrowser:_showSeriesDownloadDialog()
             end,
         },
         {
+            text = _("Unread chapters"),
+            callback = function()
+                UIManager:close(dialog)
+                local key = self:_serverKeyForCurrent()
+                local sid = self.current_series_id
+                if not key or not sid then return end
+                local unread = self:_unreadSeriesChapters(key, sid, cache)
+                if #unread == 0 then
+                    UIManager:show(InfoMessage:new{ text = _("No unread chapters") })
+                    return
+                end
+                self:_confirmAndEnqueue(self:_cacheEntriesFor(unread))
+            end,
+        },
+        {
             text = _("From current progress"),
             callback = function()
                 UIManager:close(dialog)
@@ -1332,6 +1347,28 @@ function KavitaBrowser:_isChapterRead(server_key, series_id, chapter)
     local pos = self:_journal():get_position(server_key, meta.chapterId)
     return CacheUtil.is_read(pos and pos.pageNum, meta.pagesReadSnapshot,
         chapter.pagesRead, meta.pages)
+end
+
+-- Read check that also works for not-yet-cached chapters: journal position
+-- and server pagesRead are enough, no meta.json required.
+function KavitaBrowser:_isSeriesChapterRead(server_key, series_id, chapter)
+    local id = chapter and (chapter.chapterId or chapter.id)
+    if not server_key or not series_id or not id then return false end
+    local meta = self:_store():read_meta(server_key, series_id, id)
+    local pos = self:_journal():get_position(server_key, id)
+    local pages = tonumber(chapter.pages) or (meta and tonumber(meta.pages))
+    return CacheUtil.is_read(pos and pos.pageNum,
+        meta and meta.pagesReadSnapshot, chapter.pagesRead, pages)
+end
+
+function KavitaBrowser:_unreadSeriesChapters(server_key, series_id, chapters)
+    local unread = {}
+    for __, c in ipairs(chapters or {}) do
+        if not self:_isSeriesChapterRead(server_key, series_id, c) then
+            unread[#unread + 1] = c
+        end
+    end
+    return unread
 end
 
 function KavitaBrowser:_deleteChapters(list, opts)

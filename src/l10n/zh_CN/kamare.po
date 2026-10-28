@@ -982,3 +982,9 @@ msgstr "模拟离线"
 
 msgid "Offline mode"
 msgstr "离线模式"
+
+msgid "Unread chapters"
+msgstr "缓存未读章节"
+
+msgid "No unread chapters"
+msgstr "没有未读章节"
