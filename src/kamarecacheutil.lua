@@ -80,8 +80,11 @@ end
 function Util.is_read(local_page_num, snapshot, server_pages_read, pages)
     pages = tonumber(pages)
     if not pages or pages <= 0 then return false end
-    for _, value in ipairs({ local_page_num, server_pages_read, snapshot }) do
-        local n = tonumber(value)
+    -- Explicit indexing: ipairs() would stop at a nil first value (no local
+    -- position yet) and hide server-side progress.
+    local values = { local_page_num, server_pages_read, snapshot }
+    for i = 1, 3 do
+        local n = tonumber(values[i])
         if n and n >= pages then return true end
     end
     return false
