@@ -1,5 +1,8 @@
 .idea
 
+# Scratch design docs and notes (local only; not part of the plugin)
+/.scratch/
+
 # Local KOReader bookinfo cache (generated, do not commit)
 src/bookinfo_cache.sqlite3
 *.sqlite3

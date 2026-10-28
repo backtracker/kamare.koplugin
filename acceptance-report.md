@@ -1,6 +1,7 @@
 # Acceptance report — Kamare offline cache
 
-Design: `spec.md` + `issues/01`–`09` (scratch copies at `/tmp/opencode/kamare-offline/spec/`).
+Design: `spec.md` + `issues/01`–`09` (local working copy under
+`.scratch/kavita-offline-comics/`, gitignored like the other plugin repos).
 Integration branch: `feat/kavita-offline-cache`, plugin version `0.10.0`, cache API `1`.
 
 ## How to run the automated part
@@ -13,7 +14,7 @@ Integration branch: `feat/kavita-offline-cache`, plugin version `0.10.0`, cache 
 The runner boots the KOReader emulator LuaJIT runtime (`v2026.07.2-207`) with the real
 `rapidjson`, `libarchive` and `lfs` modules. It uses no external network; the only socket
 traffic is a loopback HTTP fixture (`spec/fixtures/range_server.py`) used by the file-sink
-tests. Last run: **349 assertions passed, 0 failed**.
+tests. Last run: **631 assertions passed, 0 failed**.
 
 Anything that needs a live Kavita server is listed as manual below. (One real archive was
 checked during debugging: a 196-page nested volume produced the same 196 flattened page

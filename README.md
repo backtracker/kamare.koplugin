@@ -107,6 +107,23 @@ there on close — a deliberate deviation from the identity-only row in the API
 notes; it still never builds the queue. `queue_pause` on an empty queue
 returns `true` and `queue_state` stays `idle`, which is the truthful state.
 
+## Development
+
+```sh
+./spec/run.sh            # all specs
+./spec/run.sh queue      # one file (substring match)
+```
+
+The runner boots a KOReader emulator LuaJIT runtime (`v2026.07.2-207`) with the
+real `rapidjson`, `libarchive` and `lfs` modules. It needs no network: the only
+socket traffic is a loopback fixture. If the default runtime path does not
+exist, point `KOREADER_DIR` at a KOReader tree that contains `luajit` and
+`common/`:
+
+```sh
+KOREADER_DIR=/path/to/koreader ./spec/run.sh
+```
+
 ## Configuration
 
 Access settings while reading by tapping the screen. Customize your experience:
