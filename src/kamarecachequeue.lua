@@ -277,6 +277,23 @@ function Queue:_hydrate(entry)
     return true
 end
 
+-- Peak disk usage of a batch, in bytes. The finished cache costs about
+-- Σ archiveBytes (extracting a cbz/cbr yields roughly as many bytes as it
+-- held), and the only extra is the one archive still in flight: the queue runs
+-- serially and removes the `.part` right after extraction, so a single archive
+-- coexists with its own extracted copy. PEAK_FACTOR therefore applies to the
+-- largest item alone, never to the whole batch.
+function Queue:peak_bytes(sizes)
+    local total, largest = 0, 0
+    for __, size in ipairs(sizes or {}) do
+        local bytes = tonumber(size) or 0
+        total = total + bytes
+        if bytes > largest then largest = bytes end
+    end
+    local factor = tonumber(self.PEAK_FACTOR) or 2.05
+    return total + largest * (factor - 1)
+end
+
 -- The one space ladder, shared by enqueue (the authority) and the facade's
 -- estimate (the preview): cache limit, then free space, then the low-water
 -- mark. Returns code, message, detail, available; a nil code means it fits.
@@ -324,7 +341,7 @@ function Queue:enqueue(entries, opts)
         return nil, nil, _("Nothing to download")
     end
 
-    local accepted, seen, total = {}, {}, 0
+    local accepted, seen, sizes = {}, {}, {}
     local cached_count, queued_count = 0, 0
     for __, raw in ipairs(entries or {}) do
         if type(raw) == "table" and raw.chapterId and raw.serverKey then
@@ -342,7 +359,7 @@ function Queue:enqueue(entries, opts)
                     entry.lastError = nil
                     seen[key] = true
                     accepted[#accepted + 1] = entry
-                    total = total + (entry.archiveBytes or 0) * self.PEAK_FACTOR
+                    sizes[#sizes + 1] = entry.archiveBytes or 0
                 else
                     logger.warn("[kamare:queue] skip chapter", raw.chapterId, err)
                 end
@@ -360,16 +377,18 @@ function Queue:enqueue(entries, opts)
             { cached = cached_count, queued = queued_count }
     end
 
+    local peak = self:peak_bytes(sizes)
+
     -- Optional absolute cap (default off): quota applies to the whole cache.
     -- The verdict order and all constants live in Queue:space_verdict so the
     -- facade's estimate can never drift from the real enqueue.
-    local code, message, detail, available = self:space_verdict(total)
+    local code, message, detail, available = self:space_verdict(peak)
     if code then return nil, code, message, detail end
 
     if opts.confirm then
         local ok, confirmed = pcall(opts.confirm, {
             chapters = #accepted,
-            bytes = total,
+            bytes = peak,
             available = available,
         })
         if not ok or not confirmed then return nil, nil, _("Download cancelled") end
@@ -385,7 +404,7 @@ function Queue:enqueue(entries, opts)
     self:save()
     self:_changed()
     self:resume()
-    return true, nil, { chapters = #accepted, bytes = total, available = available }
+    return true, nil, { chapters = #accepted, bytes = peak, available = available }
 end
 
 function Queue:contains(server_key, chapter_id)
@@ -616,7 +635,7 @@ function Queue:_step()
     end
 
     local free = self.store:free_bytes()
-    local need = (entry.archiveBytes or 0) * self.PEAK_FACTOR
+    local need = self:peak_bytes({ entry.archiveBytes or 0 })
     if free and (free < self.LOW_WATER_BYTES or free < need) then
         self:pause("low_space")
         return
@@ -635,7 +654,7 @@ function Queue:_step()
     end
 
     free = self.store:free_bytes()
-    need = (entry.archiveBytes or 0) * self.PEAK_FACTOR
+    need = self:peak_bytes({ entry.archiveBytes or 0 })
     if free and (free < self.LOW_WATER_BYTES or free < need) then
         self:pause("low_space")
         return

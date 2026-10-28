@@ -662,9 +662,8 @@ function Cache.estimate(base_url, entries)
     end
     ctx = ensure_queue()
     local queue = ctx.queue
-    local factor = tonumber(queue.PEAK_FACTOR) or require("kamarecachequeue").PEAK_FACTOR
 
-    local chapters, bytes = 0, 0
+    local chapters, sizes = 0, {}
     for __, raw in ipairs(entries or {}) do
         local item = map_entry(base_url, key, raw)
         if not item and type(raw) == "table" then
@@ -695,16 +694,18 @@ function Cache.estimate(base_url, entries)
                     local series_id = copy.seriesId or item.seriesId
                     if not (series_id and ctx.store:has_meta(key, series_id, id)) then
                         chapters = chapters + 1
-                        bytes = bytes + (tonumber(copy.archiveBytes) or 0) * factor
+                        sizes[#sizes + 1] = tonumber(copy.archiveBytes) or 0
                     end
                 end
             end
         end
     end
 
-    -- The verdict comes from the same function enqueue uses. Estimate maps its
-    -- codes onto its own reason vocabulary; "nothing to do" is estimate-only
-    -- (enqueue says already_cached / already_queued instead).
+    -- Peak and verdict both come from the queue, so the preview can never
+    -- disagree with the real enqueue. Estimate maps the verdict's codes onto
+    -- its own reason vocabulary; "nothing to do" is estimate-only (enqueue
+    -- says already_cached / already_queued instead).
+    local bytes = queue:peak_bytes(sizes)
     local code, _msg, _detail, available = queue:space_verdict(bytes)
     local reason
     if chapters == 0 then

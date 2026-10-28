@@ -860,7 +860,10 @@ return function(t)
         { chapter_id = 101, series_id = 20 },
     })
     t.eq(est and est.chapters, 2, "estimate counts downloadable chapters")
-    t.eq(est and est.bytes, 6150, "estimate applies the 2.05 peak factor")
+    -- Serial queue: 1000 + 2000 cached, plus the largest archive in flight
+    -- (2.05 - 1 = 1.05x of 2000). Applying 2.05 to the whole batch would say
+    -- 6150 and reject batches that fit.
+    t.eq(est and est.bytes, 5100, "estimate peaks on one archive, not the batch")
     t.eq(est and est.available, est_free, "estimate reports available space")
     t.eq(est and est.ok, true, "estimate is ok when it fits")
     t.is_nil(est and est.reason, "estimate ok has no reason")

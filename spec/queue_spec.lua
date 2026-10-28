@@ -200,6 +200,45 @@ return function(t)
         t.eq(#q.entries, 0, "nothing queued over limit")
     end
 
+    -- peak = finished cache + the one archive in flight (the queue is serial
+    -- and deletes each .part right after extraction), never 2.05x the batch
+    do
+        local q = make(t)
+        local ok, _, plan = q:enqueue({
+            entry({ chapterId = 1 }), entry({ chapterId = 2 }), entry({ chapterId = 3 }),
+        })
+        t.ok(ok, "batch enqueue succeeds")
+        t.eq(plan and plan.bytes, 4050, "peak is Σ archive + one in-flight archive")
+        t.eq(#q.entries, 3, "the whole batch is queued")
+    end
+
+    -- 900 MB free holds three 200 MB volumes: 600 MB cached + one 200 MB
+    -- archive in flight = 810 MB. Multiplying the batch (1230 MB) would reject.
+    do
+        local MB = 1024 * 1024
+        local q = make(t, { free = 900 * MB })
+        local ok, code = q:enqueue({
+            entry({ chapterId = 1, archiveBytes = 200 * MB }),
+            entry({ chapterId = 2, archiveBytes = 200 * MB }),
+            entry({ chapterId = 3, archiveBytes = 200 * MB }),
+        })
+        t.ok(ok, "a batch whose real peak fits is accepted")
+        t.is_nil(code, "fitting batch carries no space code")
+    end
+
+    -- the same batch still fails when even the serial peak does not fit
+    do
+        local MB = 1024 * 1024
+        local q = make(t, { free = 800 * MB })
+        local ok, code = q:enqueue({
+            entry({ chapterId = 1, archiveBytes = 200 * MB }),
+            entry({ chapterId = 2, archiveBytes = 200 * MB }),
+            entry({ chapterId = 3, archiveBytes = 200 * MB }),
+        })
+        t.is_nil(ok, "a batch over the serial peak is still rejected")
+        t.eq(code, "not_enough_space", "serial peak rejection code")
+    end
+
     -- enqueue confirmation can cancel
     do
         local q = make(t)

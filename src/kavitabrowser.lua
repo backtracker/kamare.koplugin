@@ -704,13 +704,14 @@ function KavitaBrowser:_confirmAndEnqueue(entries, opts)
     end
     local unit_text = self:_cacheUnitText(entries, opts and opts.unit)
     local store = self:_store()
-    local peak_factor = self:_queue().PEAK_FACTOR or 2.05
-    local download_bytes, peak_bytes = 0, 0
+    local queue = self:_queue()
+    local download_bytes, sizes = 0, {}
     for __, e in ipairs(entries) do
         local bytes = tonumber(e.archiveBytes) or 0
         download_bytes = download_bytes + bytes
-        peak_bytes = peak_bytes + bytes * peak_factor
+        sizes[#sizes + 1] = bytes
     end
+    local peak_bytes = queue:peak_bytes(sizes)
     local free = store:free_bytes()
     if free and peak_bytes > free then
         UIManager:show(InfoMessage:new{
