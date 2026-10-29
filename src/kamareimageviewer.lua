@@ -3530,6 +3530,17 @@ function KamareImageViewer:_postViewProgress(force)
         logger.dbg(string.format(
             "[kamare:progress] held pageNum=%d below server=%d (rewind goes through journal sync)",
             journal_page, floor))
+        -- On close a rewind must still reach the server, but only through the
+        -- journal base rule (read the server first, write low only if nobody
+        -- moved it since this device confirmed the position).
+        if force and self.cache_journal and self.cache_identity then
+            pcall(self.cache_journal.sync, self.cache_journal, KavitaClient, {
+                only = {
+                    serverKey = self.cache_identity.serverKey,
+                    chapterId = self.cache_identity.chapterId,
+                },
+            })
+        end
         return
     end
 
@@ -3544,17 +3555,6 @@ function KamareImageViewer:_postViewProgress(force)
     end
 
     if force then
-        -- 回退不能裸 POST（Kavita 的写入是无条件覆盖）。交给 journal 的 base 判定：
-        -- 先读一次服务端，只有「没人动过」才把更低的位置写上去。
-        if blocked and self.cache_journal and self.cache_identity then
-            pcall(self.cache_journal.sync, self.cache_journal, KavitaClient, {
-                only = {
-                    serverKey = self.cache_identity.serverKey,
-                    chapterId = self.cache_identity.chapterId,
-                },
-            })
-            return
-        end
         -- Immediate (sync) POST — used on close to ensure progress is saved.
         -- Cancel any in-flight async POST first so it can't land after the
         -- close POST and clobber the final position with an older page.
