@@ -5,7 +5,11 @@ Two structures, both local to the device:
 
   positions[serverKey:chapterId]  the exact PageNum that would be POSTed to
                                   Kavita (non-last page: physical-1; last page:
-                                  physical), replayed on reconnect
+                                  physical), replayed on reconnect, plus
+                                  `basePage` = the server value this device last
+                                  confirmed (push or adopt). That base is what
+                                  separates "I rewound on purpose" from "I am
+                                  simply behind"; see Util.resolve_progress
   sessions[]                      real local start/end and page span; never
                                   pushed to Kavita (its timestamps cannot be
                                   backdated, see ticket 01)
@@ -22,6 +26,7 @@ cached chapter does not lose its pending progress.
 local lfs = require("libs/libkoreader-lfs")
 local rapidjson = require("rapidjson")
 local logger = require("logger")
+local Util = require("kamarecacheutil")
 
 local Journal = {}
 Journal.__index = Journal
@@ -247,9 +252,11 @@ local function find_position(self, server_key, chapter_id)
     return self.positions[self:_key(server_key, chapter_id)]
 end
 
-function Journal:mark_pushed(server_key, chapter_id)
+--- `page`（可选）是这次真正写到服务端的 PageNum：它同时就是「已确认的服务端位置」。
+function Journal:mark_pushed(server_key, chapter_id, page)
     local pos = find_position(self, server_key, chapter_id)
     if not pos then return false end
+    pos.basePage = tonumber(page) or pos.pageNum
     pos.status = "pushed"
     pos.ts = pos.ts or self.clock()
     self:_mark_dirty(false)
@@ -411,9 +418,41 @@ function Journal:_session_end_for(pos)
     return pos.ts or 0
 end
 
---- Push pending/failed positions to Kavita using the monotonic rule.
+--- 用服务端位置对齐本机 journal（开书时，只读 + 必要的本地采纳，不发文）。
+---
+--- 返回最终位置（Kavita 0-based PageNum）。别人读得更远就采纳；本机回翻且服务端
+--- 自确认后没动过就留在本机 —— 两边都能正确续读，见 Util.resolve_progress。
+---@param entry table { serverKey, chapterId }
+---@param server_page integer 服务端 PageNum
+---@return integer page
+function Journal:reconcile(entry, server_page)
+    local pos = find_position(self, entry.serverKey, entry.chapterId)
+    local decision, page = Util.resolve_progress(pos, server_page)
+    if not pos then return page end
+    local changed = false
+    if decision == "adopt" then
+        pos.pageNum, pos.basePage, pos.status = page, page, "pushed"
+        pos.ts = self.clock()
+        changed = true
+    elseif tonumber(pos.basePage) ~= server_page then
+        -- 本机更靠前（未推送）：服务端值仍然要记下来，下次才分得清「回翻」和「落后」。
+        pos.basePage = server_page
+        if decision == "push" then pos.status = "pending" end
+        changed = true
+    end
+    if changed then self:_mark_dirty(false) end
+    return page
+end
+
+--- Push pending/failed positions to Kavita.
+---
+--- Decision per position comes from Util.resolve_progress, so a rewind is pushed
+--- only when nobody moved the server since this device confirmed the position,
+--- and a stale device adopts the server instead of pushing an older page.
 --- opts = { is_current = function(pos) -> bool,
----          prompt_current = function(pos, remote) -> "local"|"remote" }
+---          prompt_current = function(pos, remote) -> "local"|"remote",
+---          force_current_chapter = chapterId,
+---          only = { serverKey, chapterId }  -- 只处理这一章（关书时用） }
 --- returns { pushed, superseded, failed, skipped, conflict }
 function Journal:sync(client, opts)
     opts = opts or {}
@@ -422,7 +461,12 @@ function Journal:sync(client, opts)
 
     local pending = {}
     for _, pos in pairs(self.positions) do
-        if pos.status == "pending" or pos.status == "failed" then
+        local wanted = pos.status == "pending" or pos.status == "failed"
+        if wanted and opts.only then
+            wanted = tostring(pos.serverKey) == tostring(opts.only.serverKey)
+                and tostring(pos.chapterId) == tostring(opts.only.chapterId)
+        end
+        if wanted then
             pending[#pending + 1] = pos
         end
     end
@@ -447,29 +491,33 @@ function Journal:sync(client, opts)
             unreachable = 0
             local remote_page = tonumber(remote.pageNum) or 0
             local local_page = tonumber(pos.pageNum) or 0
-            local push = local_page > remote_page
+            local decision, page = Util.resolve_progress(pos, remote_page)
+            local push = decision == "push"
+            page = tonumber(page) or local_page
 
+            -- 手动「同步进度」的两条覆盖：用户明确选本地时，允许把落后的位置推上去。
             if not push and local_page < remote_page
                 and opts.force_current_chapter and opts.force_current_chapter == pos.chapterId then
-                push = true
+                push, page = true, local_page
             elseif not push and local_page < remote_page
                 and opts.is_current and opts.is_current(pos) and opts.prompt_current then
                 local choice = opts.prompt_current(pos, remote)
                 summary.conflict = summary.conflict + 1
-                if choice == "local" then push = true end
+                if choice == "local" then push, page = true, local_page end
             end
 
             if push then
                 local payload = {
                     volumeId = pos.volumeId,
                     chapterId = pos.chapterId,
-                    pageNum = local_page,
+                    pageNum = page,
                     seriesId = pos.seriesId,
                     libraryId = pos.libraryId,
                 }
                 local post_ok, pcode = pcall(client.postReaderProgress, client, payload)
                 if not post_ok then pcode = -1 end
                 if pcode == 200 or pcode == 204 then
+                    pos.pageNum, pos.basePage = page, page
                     pos.status = "pushed"
                     summary.pushed = summary.pushed + 1
                 else
@@ -477,6 +525,8 @@ function Journal:sync(client, opts)
                     summary.failed = summary.failed + 1
                 end
             else
+                -- 服务端赢：先采纳它的位置（本机落后时不再抱着旧页），再标 superseded。
+                pos.pageNum, pos.basePage = page, remote_page
                 pos.status = "superseded"
                 summary.superseded = summary.superseded + 1
             end

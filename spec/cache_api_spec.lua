@@ -1204,12 +1204,17 @@ return function(t)
 
     -- A cached chapter opened at an explicit start page still needs the read
     -- tier: the viewer writes the offline session to the journal on close.
+    -- The start page is a *server hint* and gets reconciled with the journal,
+    -- so the journal here must be isolated (a shared one would leak positions
+    -- written by other cases in this file).
     local sj_dir = t.tmpdir()
     local sj_store = Store:new{ data_dir = sj_dir }
     local sj_settings = fake_settings()
+    local sj_journal = Journal:new{ settings_dir = sj_dir }
+    sj_journal:load()
     Cache.set_context(nil)
     Cache.set_context{
-        store = sj_store, settings = sj_settings, client = {},
+        store = sj_store, settings = sj_settings, client = {}, journal = sj_journal,
     }
     meta(sj_store, 60, { pages = 5 })
     local captured
@@ -1227,6 +1232,54 @@ return function(t)
     }
     t.ok(viewer ~= nil, "open returns a viewer for a cached chapter at a start page")
     t.eq(captured and captured.metadata.startPage, 3, "explicit start page wins")
+
+    -- The start page is a server hint reconciled with the journal:
+    -- * another device read further  -> open at the server page
+    -- * this device rewound on purpose -> keep the rewind
+    local prev_ctx = Cache.get_context()
+    local function open_with_journal(hint)
+        local got
+        package.loaded["kamareimageviewer"] = {
+            active_instance = nil,
+            new = function(_, o) got = o; return { _aborted = false } end,
+        }
+        local viewer2 = Cache.open{
+            base_url = "https://example", api_key = "k",
+            entry = { chapterId = 61, seriesId = 20, volumeId = 30, libraryId = 10, pages = 5 },
+            start_page = hint,
+        }
+        t.ok(viewer2 ~= nil, "open returns a viewer")
+        return got
+    end
+
+    do
+        local jd = t.tmpdir()
+        local jstore = Store:new{ data_dir = jd }
+        local jj = Journal:new{ settings_dir = jd }
+        jj:load()
+        meta(jstore, 61, { pages = 5 })
+        Cache.set_context(nil)
+        Cache.set_context{ store = jstore, settings = fake_settings(), client = {}, journal = jj }
+
+        -- stale device: journal 2 (0-based), base 2, server 4 -> adopt 4
+        jj:set_position({ serverKey = "k1", libraryId = 10, seriesId = 20, volumeId = 30,
+            chapterId = 61, seriesName = "S", chapterTitle = "C" }, 2)
+        jj:get_position("k1", 61).basePage = 2
+        local got = open_with_journal(5)
+        t.eq(got.metadata.startPage, 5, "stale device opens at the server page")
+        t.eq(jj:get_position("k1", 61).pageNum, 4, "journal raised to the server")
+
+        -- deliberate rewind: journal 3, base 4, server 4 -> stay at 3
+        jj:set_position({ serverKey = "k1", libraryId = 10, seriesId = 20, volumeId = 30,
+            chapterId = 61, seriesName = "S", chapterTitle = "C" }, 3)
+        jj:get_position("k1", 61).basePage = 4
+        got = open_with_journal(5)
+        t.eq(got.metadata.startPage, 4, "rewind survives: journal 3 -> page 4")
+        t.eq(jj:get_position("k1", 61).status, "pending", "rewind stays pending for the close-time sync")
+        t.eq(got.metadata.serverPage, 4, "viewer is told the server floor for the write guard")
+        Cache.set_context(nil)
+        Cache.set_context(prev_ctx)
+    end
     t.eq(captured and captured.page_source, "local", "cached chapter reads from disk")
     t.ok(captured and captured.cache_journal ~= nil,
         "cached open carries a journal even with an explicit start page")

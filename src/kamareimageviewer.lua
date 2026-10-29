@@ -72,9 +72,15 @@ local function isPermanentFetchFailure(code)
     return false
 end
 
+-- How long a lower page must be held before it counts as a deliberate rewind.
+-- See _postViewProgress: without it, "flip back to peek, then close" would
+-- drag the server (and the shelf) down to a position nobody meant to keep.
+local REWIND_HOLD_SECONDS = 10
+
 local KamareImageViewer = InputContainer:extend{
     images_list_data = nil,
     images_list_nb = nil,
+    REWIND_HOLD_SECONDS = REWIND_HOLD_SECONDS,
 
     fullscreen = true,
     width = nil,
@@ -229,8 +235,10 @@ function KamareImageViewer:init()
 
     self:_initDocument()
 
-    -- Offline reading session: local-only record (never pushed to Kavita).
-    if self.cache_journal and self.metadata and self.page_source == "local" then
+    -- Local reading record + the position this device last confirmed with the
+    -- server. Built for streamed chapters too: the write guard and the rewind
+    -- rule need `basePage` there as well.
+    if self.cache_journal and self.metadata then
         self.cache_identity = {
             serverKey = self.cache_server_key,
             libraryId = self.metadata.libraryId,
@@ -246,6 +254,11 @@ function KamareImageViewer:init()
                 math.max(0, (self.metadata.startPage or 1) - 1), { source = "offline" })
         end
     end
+
+    -- Kavita's PageNum as known when the chapter was opened: never POST below
+    -- it. Rewinds are not dropped, they go through the journal base rule on
+    -- close instead of overwriting the server blindly.
+    self._server_floor = tonumber(self.metadata and self.metadata.serverPage)
 
     self:_initCanvas()
     self:_setupStatisticsInterface()
@@ -3476,6 +3489,19 @@ function KamareImageViewer:_postViewProgress(force)
         journal_page = math.max(0, physical_page - 1)
     end
 
+    -- Rewind deadband: after reaching a higher page in this session, flipping
+    -- back only counts as intent once the lower page is held for a while.
+    -- Otherwise "flip back to peek, then close" would lower the server and the
+    -- shelf with it.
+    local now = os.time()
+    if self._journal_peak == nil or journal_page >= self._journal_peak then
+        self._journal_peak = journal_page
+        self._rewind_since = nil
+    else
+        self._rewind_since = self._rewind_since or now
+        if now - self._rewind_since < self.REWIND_HOLD_SECONDS then return end
+    end
+
     if self.last_posted_page == journal_page and not (at_end or on_last_page) then return end
 
     -- Journal first: a crash during the POST must not lose the position.
@@ -3496,6 +3522,17 @@ function KamareImageViewer:_postViewProgress(force)
         return
     end
 
+    -- Holding a page below the server's: record locally, don't overwrite it.
+    local floor = self._server_floor
+    local blocked = floor ~= nil and journal_page < floor
+    if blocked then
+        self.last_posted_page = journal_page
+        logger.dbg(string.format(
+            "[kamare:progress] held pageNum=%d below server=%d (rewind goes through journal sync)",
+            journal_page, floor))
+        return
+    end
+
     -- Kavita never needs "page 0": while the reader is on page 1 keep the old
     -- behaviour of reporting page 1, the journal stays exactly 0-based.
     local page_to_post = math.max(1, journal_page)
@@ -3507,6 +3544,17 @@ function KamareImageViewer:_postViewProgress(force)
     end
 
     if force then
+        -- 回退不能裸 POST（Kavita 的写入是无条件覆盖）。交给 journal 的 base 判定：
+        -- 先读一次服务端，只有「没人动过」才把更低的位置写上去。
+        if blocked and self.cache_journal and self.cache_identity then
+            pcall(self.cache_journal.sync, self.cache_journal, KavitaClient, {
+                only = {
+                    serverKey = self.cache_identity.serverKey,
+                    chapterId = self.cache_identity.chapterId,
+                },
+            })
+            return
+        end
         -- Immediate (sync) POST — used on close to ensure progress is saved.
         -- Cancel any in-flight async POST first so it can't land after the
         -- close POST and clobber the final position with an older page.
@@ -3519,8 +3567,11 @@ function KamareImageViewer:_postViewProgress(force)
         local ok, code = pcall(function()
             return KavitaClient:postReaderProgressForPage(self.metadata, page_to_post)
         end)
-        if ok and (code == 200 or code == 204) and journal and self.cache_identity then
-            journal:mark_pushed(self.cache_identity.serverKey, self.cache_identity.chapterId)
+        if ok and (code == 200 or code == 204) then
+            self._server_floor = math.max(tonumber(self._server_floor) or 0, page_to_post)
+            if journal and self.cache_identity then
+                journal:mark_pushed(self.cache_identity.serverKey, self.cache_identity.chapterId, page_to_post)
+            end
         end
     else
         -- Debounced: accumulate page changes during fast scroll, fire once
@@ -3547,9 +3598,12 @@ function KamareImageViewer:_postViewProgress(force)
                 function(_, _code)
                     self._progress_post_inflight = false
                     self._progress_post_handle = nil
-                    if _code == 200 and self.cache_journal and self.cache_identity then
-                        self.cache_journal:mark_pushed(self.cache_identity.serverKey,
-                            self.cache_identity.chapterId)
+                    if _code == 200 then
+                        self._server_floor = math.max(tonumber(self._server_floor) or 0, page)
+                        if self.cache_journal and self.cache_identity then
+                            self.cache_journal:mark_pushed(self.cache_identity.serverKey,
+                                self.cache_identity.chapterId, page)
+                        end
                     end
                     if self._progress_post_pending then
                         self._progress_post_pending = false

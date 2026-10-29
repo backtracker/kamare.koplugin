@@ -983,7 +983,7 @@ function Cache.open(opts)
         return nil, "offline_not_cached", _("Not cached · connect to download")
     end
 
-    local start_page = tonumber(opts.start_page)
+    local start_page = tonumber(opts.start_page) -- 1-based：调用方给的服务端建议
     if meta then
         -- A cached chapter always builds the read tier, even when a start page
         -- is explicit: the viewer records the offline session in the journal
@@ -991,18 +991,33 @@ function Cache.open(opts)
         -- module header).
         ctx = ensure_read()
     end
+    -- Start page: server hint > journal (offline) > download snapshot > 1.
+    -- When the server value is known, it is reconciled with the journal first
+    -- (Util.resolve_progress): another device reading further wins, while this
+    -- device's deliberate rewind survives as long as nobody moved the server
+    -- since it confirmed the position. The viewer therefore opens on the final
+    -- position on its first frame instead of jumping after the fact.
+    local server_page
     if start_page then
-        start_page = math.max(1, math.min(start_page, pages))
+        server_page = math.max(0, math.min(start_page - 1, pages - 1))
+    end
+    local resolved
+    if server_page then
+        ctx = ensure_read()
+        if ctx.journal then
+            resolved = ctx.journal:reconcile({ serverKey = key, chapterId = chapter_id }, server_page)
+        else
+            resolved = server_page
+        end
     elseif meta then
         local resume = Cache.resume_page(base_url, chapter_id, series_id)
-        start_page = resume and resume.page or 1
+        local page = resume and tonumber(resume.page)
+        resolved = page and (page - 1) or nil
     elseif not offline and ctx.client and ctx.client.getReaderProgress then
         local pok, progress = pcall(ctx.client.getReaderProgress, ctx.client, chapter_id)
-        local page = pok and progress and tonumber(progress.pageNum) or nil
-        start_page = page and math.min(math.max(1, page + 1), pages) or 1
-    else
-        start_page = 1
+        resolved = pok and progress and tonumber(progress.pageNum) or nil
     end
+    start_page = math.max(1, math.min((tonumber(resolved) or 0) + 1, pages))
 
     local preloaded_dimensions
     if meta and type(meta.dims) == "table" and #meta.dims > 0 then
@@ -1033,6 +1048,10 @@ function Cache.open(opts)
         chapterTitle = (meta and meta.chapterTitle) or entry.chapterTitle
             or entry.chapter_title or opts.title,
         startPage = start_page,
+        -- Write guard: never POST a page below the server's known position.
+        -- Rewinds still reach the server, but through the journal base rule at
+        -- close time (sync), not through the live POST.
+        serverPage = server_page or resolved,
         content_type = opts.content_type or entry.content_type or "auto",
         serverKey = key,
         offline = offline,
@@ -1058,7 +1077,7 @@ function Cache.open(opts)
         local_meta = meta,
         cache_store = meta and ctx.store or nil,
         cache_server_key = key,
-        cache_journal = meta and ctx.journal or nil,
+        cache_journal = ctx.journal,
         on_close_callback = opts.on_close,
         on_next_chapter_callback = opts.on_next,
     }

@@ -80,8 +80,7 @@ function Util.resolve_start_page(journal_page_num, snapshot, pages)
 end
 
 --- Read predicate used by "delete read chapters" (04 A9, union of sources).
-function Util.is_read(local_page_num, snapshot, server_pages_read, pages)
-    pages = tonumber(pages)
+function Util.is_read(local_page_num, snapshot, server_pages_read, pages)    pages = tonumber(pages)
     if not pages or pages <= 0 then return false end
     -- Explicit indexing: ipairs() would stop at a nil first value (no local
     -- position yet) and hide server-side progress.
@@ -91,6 +90,51 @@ function Util.is_read(local_page_num, snapshot, server_pages_read, pages)
         if n and n >= pages then return true end
     end
     return false
+end
+
+--- Decide who owns the position when this device and the server disagree.
+---
+--- Both numbers are Kavita's 0-based PageNum (`== pages` means finished).
+--- `pos.basePage` is the server value this device last confirmed (pushed or adopted).
+--- Comparing pages alone cannot tell "I deliberately rewound" from "I am simply
+--- behind"; the confirmed base is what separates them:
+---
+---   page > base              un-pushed reading on this device (offline or in-flight)
+---   page == base             at rest: whatever the server says wins
+---   page <  base             this device rewound after confirming `base`
+---
+--- Rejected alternative: order writes by timestamp. The server's `lastModifiedUtc`
+--- is trustworthy, but a device that read offline has no server timestamp for its
+--- own position, so concurrent "offline forward" vs "online rewind" stays
+--- undecidable and the later of the two cannot be known. Falling back to "further
+--- wins" for that case is the only rule that never throws away pages read.
+---@param pos table|nil journal position ({ pageNum, basePage })
+---@param server_page integer server PageNum
+---@return "push"|"adopt"|"same" decision, integer page
+function Util.resolve_progress(pos, server_page)
+    server_page = math.max(0, math.floor(tonumber(server_page) or 0))
+    local page = pos and tonumber(pos.pageNum)
+    if not page then return "adopt", server_page end
+    local base = tonumber(pos.basePage)
+    if base == nil then
+        -- Journals written before `basePage` existed: keep the historical
+        -- monotonic rule (local ahead pushes, behind adopts) so upgrading does
+        -- not resurrect positions that were already settled.
+        if page > server_page then return "push", page end
+        if page < server_page then return "adopt", server_page end
+        return "same", page
+    end
+    if page > base then
+        if page >= server_page then return "push", page end
+        return "adopt", server_page
+    elseif page == base then
+        if server_page == page then return "same", page end
+        return "adopt", server_page
+    end
+    -- Rewound after confirming `base`: only push if nobody moved the server since.
+    if server_page == base then return "push", page end
+    if server_page >= page then return "adopt", server_page end
+    return "push", page
 end
 
 return Util

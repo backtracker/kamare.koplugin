@@ -234,6 +234,80 @@ return function(t)
         t.eq(s.pushed, 1, "forced push counted")
     end
 
+    -- confirmed base decides rewind vs stale (Util.resolve_progress)
+    do
+        local function journal_with(page, base)
+            local j = make(t)
+            j:set_position(entry(100), page, { source = "offline" })
+            j:get_position("srv1", 100).basePage = base
+            return j
+        end
+
+        -- 离线读得更远：服务端被别人写过也要推（读过的页不能丢）。
+        local j1 = journal_with(80, 30)
+        local c1 = fake_client({ remote = { [100] = 31 } })
+        t.eq(j1:sync(c1).pushed, 1, "offline forward beats a newer server write")
+        t.eq(c1.posts[1].pageNum, 80, "pushed the further page")
+        t.eq(j1:get_position("srv1", 100).basePage, 80, "push confirms the base")
+
+        -- 本机只是落后（没有未推送阅读）：采纳服务端。
+        local j2 = journal_with(30, 30)
+        local c2 = fake_client({ remote = { [100] = 60 } })
+        t.eq(j2:sync(c2).superseded, 1, "stale device does not push")
+        t.eq(#c2.posts, 0, "no POST when stale")
+        t.eq(j2:get_position("srv1", 100).pageNum, 60, "stale device adopts the server")
+        t.eq(j2:get_position("srv1", 100).basePage, 60)
+
+        -- 回翻：确认过 50 才往回读到 35，服务端没动 → 合法回退，推。
+        local j3 = journal_with(35, 50)
+        local c3 = fake_client({ remote = { [100] = 50 } })
+        t.eq(j3:sync(c3).pushed, 1, "rewind after confirming the server is pushed")
+        t.eq(c3.posts[1].pageNum, 35, "server follows the rewind")
+
+        -- 回翻期间别人又读远了：取更靠后（Q14）。
+        local j4 = journal_with(35, 50)
+        local c4 = fake_client({ remote = { [100] = 60 } })
+        t.eq(j4:sync(c4).superseded, 1, "concurrent: further wins, no push")
+        t.eq(j4:get_position("srv1", 100).pageNum, 60, "adopted the further page")
+
+        -- 别人在我确认之后回翻了：采纳别人的回退（最新意图）。
+        local j5 = journal_with(40, 40)
+        local c5 = fake_client({ remote = { [100] = 35 } })
+        t.eq(j5:sync(c5).superseded, 1, "someone else rewound: adopt it")
+        t.eq(j5:get_position("srv1", 100).pageNum, 35, "resume at their rewind")
+    end
+
+    -- reconcile: opening a book aligns the journal without any network write
+    do
+        local j = make(t)
+        j:set_position(entry(100), 35, { source = "offline" })
+        j:get_position("srv1", 100).basePage = 50
+        t.eq(j:reconcile({ serverKey = "srv1", chapterId = 100 }, 50), 35, "legit rewind survives open")
+        t.eq(j:get_position("srv1", 100).status, "pending", "rewind stays pending for the close-time sync")
+
+        local j2 = make(t)
+        j2:set_position(entry(100), 30, { source = "offline" })
+        j2:get_position("srv1", 100).basePage = 30
+        t.eq(j2:reconcile({ serverKey = "srv1", chapterId = 100 }, 80), 80, "stale open adopts the server")
+        t.eq(j2:get_position("srv1", 100).pageNum, 80, "journal raised to the server")
+        t.eq(j2:get_position("srv1", 100).status, "pushed", "adopted position needs no push")
+
+        local j3 = make(t)
+        t.eq(j3:reconcile({ serverKey = "srv1", chapterId = 101 }, 12), 12, "no journal entry -> server page")
+    end
+
+    -- only: filter by chapter (close-time sync must not replay unrelated chapters)
+    do
+        local j = make(t)
+        j:set_position(entry(1), 10, { source = "offline" })
+        j:set_position(entry(2), 10, { source = "offline" })
+        local c = fake_client({ remote = {} })
+        local summary = j:sync(c, { only = { serverKey = "srv1", chapterId = 2 } })
+        t.eq(summary.pushed, 1, "only the requested chapter is synced")
+        t.eq(c.posts[1].chapterId, 2)
+        t.eq(j:get_position("srv1", 1).status, "pending", "other chapters untouched")
+    end
+
     -- sync order follows session end time
     do
         local j = make(t)
