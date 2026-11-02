@@ -1243,3 +1243,15 @@ msgstr "按两下重新设置（先下一页、再上一页）"
 
 msgid "Reader KeyPress"
 msgstr "阅读页收到的按键"
+
+msgid "Bluetooth page turner"
+msgstr "蓝牙翻页器"
+
+msgid "Cache (offline reading and cleanup)"
+msgstr "缓存（离线阅读与清理）"
+
+msgid "Crop borders"
+msgstr "裁切边框"
+
+msgid "Dual-page split"
+msgstr "双页拆分"

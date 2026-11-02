@@ -167,6 +167,14 @@ Releases inject the plugin version into `kamareversion.lua`; a plain checkout
 reports `0.10.4-dev`. The cache API version is independent of the plugin
 version (`API_VERSION = 1`, plugin 0.10.x).
 
+### Feature manifest
+
+`kamarefeatures.lua` lists the user-visible features Moon shows on its Kavita
+cache page. Moon renders the strings as-is and does not interpret IDs, so this
+list belongs to Kamare: add or remove entries here and ship the translations in
+the plugin's own gettext catalog. Older builds without the file simply show no
+feature list. `api_version` is bumped only when the manifest shape changes.
+
 ## Bluetooth page turner
 
 A Bluetooth page turner (the clicker kind, usually sold for phones) arrives as
