@@ -164,7 +164,7 @@ re-implementing any of it. See [What's new in 0.10](#pass-2--public-cache-api-fo
 for the capability list and error-code contract.
 
 Releases inject the plugin version into `kamareversion.lua`; a plain checkout
-reports `0.10.4-dev`. The cache API version is independent of the plugin
+reports `0.10.5-dev`. The cache API version is independent of the plugin
 version (`API_VERSION = 1`, plugin 0.10.x).
 
 ### Feature manifest
