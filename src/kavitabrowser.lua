@@ -1934,6 +1934,55 @@ function KavitaBrowser:showTitleMenu()
         align = "left",
     }})
 
+    -- Read-only pager status + a live key test. The only knob (enable/disable)
+    -- lives in Moon's settings page; duplicating it here would create a second
+    -- source of truth.
+    table.insert(buttons, {{
+        text = _("Pager keys"),
+        callback = function()
+            UIManager:close(dialog)
+            require("kamarepager").show_bindings()
+        end,
+        align = "left",
+    }})
+
+    table.insert(buttons, {{
+        text = _("Bluetooth pager status"),
+        callback = function()
+            UIManager:close(dialog)
+            require("kamarepager").show_diagnostics()
+        end,
+        align = "left",
+    }})
+
+    table.insert(buttons, {{
+        text = _("Sniff pager keys (30s)"),
+        callback = function()
+            UIManager:close(dialog)
+            local ok, err = require("kamarepager").sniff_for(30)
+            UIManager:show(InfoMessage:new{
+                text = ok and _("Press every pager button now; the diagnostics page opens after 30 seconds.")
+                    or (_("Sniff unavailable") .. ": " .. tostring(err)),
+                timeout = 4,
+            })
+        end,
+        align = "left",
+    }})
+
+    table.insert(buttons, {{
+        text = _("Save pager diagnostics to file"),
+        callback = function()
+            UIManager:close(dialog)
+            local path, err = require("kamarepager").save_diagnostics()
+            if path then
+                UIManager:show(InfoMessage:new{ text = _("Saved to") .. ":\n" .. path })
+            else
+                UIManager:show(InfoMessage:new{ text = _("Save failed") .. ": " .. tostring(err) })
+            end
+        end,
+        align = "left",
+    }})
+
     dialog = ButtonDialog:new{
         buttons = buttons,
         shrink_unneeded_width = true,

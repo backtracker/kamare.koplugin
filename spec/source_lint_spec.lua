@@ -62,4 +62,16 @@ return function(t)
     local direct_calls = select(2, viewer_source:gsub("on_next_chapter_callback%s*%(", ""))
     t.eq(direct_calls, 0,
         "kamareimageviewer: do not call the next-chapter callback inline (close the viewer first)")
+
+    -- `%1` is a T() placeholder, not a string.format() directive. Feeding one
+    -- to string.format() throws "invalid option '%1'" -- and in moon_source.lua
+    -- that crashed Moon's entire settings page, which the specs never load.
+    for name in lfs.dir(src) do
+        if name:match("%.lua$") then
+            local source = read(src .. "/" .. name) or ""
+            local offending = source:match('[^\n]*string%.format%(%s*_%(%s*"[^"\n]*%%[1-9][^\n]*')
+            t.ok(offending == nil,
+                name .. ": %N placeholders must go through T(), not string.format()")
+        end
+    end
 end

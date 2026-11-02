@@ -164,8 +164,66 @@ re-implementing any of it. See [What's new in 0.10](#pass-2--public-cache-api-fo
 for the capability list and error-code contract.
 
 Releases inject the plugin version into `kamareversion.lua`; a plain checkout
-reports `0.10.3-dev`. The cache API version is independent of the plugin
+reports `0.10.4-dev`. The cache API version is independent of the plugin
 version (`API_VERSION = 1`, plugin 0.10.x).
+
+## Bluetooth page turner
+
+A Bluetooth page turner (the clicker kind, usually sold for phones) arrives as
+an ordinary evdev keyboard. On touch-only devices KOReader never opens that
+node, so the keys go nowhere: Kamare finds it, opens it, teaches KOReader its
+key codes, and turns pages with it. Works with or without Moon.
+
+- **Standard page keys need no setup.** Anything KOReader already names
+  `LPgFwd`/`LPgBack` (PageUp/PageDown, volume keys, arrow keys) turns the page
+  as-is; the pager only adds the missing path on devices where the reading page
+  never receives those key presses.
+- **Unusual keys are yours to assign; Kamare does not guess.** A phone remote
+  that sends zoom/shutter codes (e.g. `168`/`169`) will not page until you bind
+  it. Open a book and **long-press the top 8% of the screen** → **Pager keys**:
+  - **Set up by pressing twice** asks for the next-page button, then the
+    previous-page button, and refuses to bind the same key to both;
+  - the two rows below show the current codes and let you add or remove one key
+    at a time.
+  Each action holds a list of raw key codes (up to 8), so one action can be
+  driven by several buttons; **Reset to defaults** brings back `104`/`109`.
+  Bindings are stored per device in `G_reader_settings`, so whatever you set
+  here is what applies here.
+- **Works in every reading mode** — page, dual page and continuous scroll.
+- **Only inside the Kamare viewer.** A binding is consumed only while the
+  manga page is the topmost window: with a menu or dialog open the key goes to
+  that dialog instead. Moon's own *physical page keys* setting is a separate,
+  independent feature and is untouched.
+- **On Android there is no node to take over** — KOReader gets keys straight
+  from the system, and they carry Android keycodes. Kamare observes every key
+  at the input backend (and again at the keyboard handler, exactly once), so
+  binding works there too; keys KOReader already maps to page turns are also
+  handled directly, without relying on the reading page's key table.
+- **Diagnosis built in.** Long-press the top of a reading page → **Pager
+  diagnostics**: state, backend, current bindings, the last key received, and
+  every input node with the full list of key codes it declares. The same menu
+  has a 30-second **key sniffer** that temporarily opens *every* input node
+  (needed on Kindle/Kobo for buttons that live on a node Kamare has not taken
+  over) and **Save pager diagnostics to file**.
+- **Connection is not Kamare's job.** On Kindle the
+  [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough)
+  daemon turns the BLE remote into a virtual keyboard (Kamare starts the daemon
+  if it is installed but not running). On Kobo, pair it with the system
+  Bluetooth stack; Kamare picks up the `uhid` node. The Kobo path has not been
+  verified on real hardware end to end.
+- **Coexists with `pageturner.koplugin`.** Both may be installed: whichever
+  takes the device first, only the plugin that binds a key swallows it, and
+  Kamare handles the standard `GotoViewRel` event that pageturner broadcasts, so
+  a page never turns twice.
+- **Not covered:** reading EPUBs/PDFs in KOReader's own reader (Kamare only
+  handles its own manga viewer), single-key pagers with gestures, and
+  hold-to-scroll. Those stay out of scope for now.
+- Status: Kamare's own top-left menu → **Bluetooth pager status**. The
+  enable/disable switch and **Rescan** live in Moon's settings
+  (**Reader → Pager**); both read the same setting.
+- For other plugins: `require("kamarepager")` exposes `api_version`,
+  `capabilities`, `status()`, `on()`/`off()` and `bindings()` — the same
+  probe-and-degrade contract as the cache API.
 
 ## Development
 

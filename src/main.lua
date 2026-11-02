@@ -28,6 +28,7 @@ local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local KavitaBrowser = require("kavitabrowser")
 local KavitaClient = require("kavitaclient")
+local Pager = require("kamarepager")
 local logger = require("logger")
 local LuaSettings = require("luasettings")
 local UIManager = require("ui/uimanager")
@@ -80,7 +81,18 @@ function Kamare:init()
 
     -- Footer mode will be loaded by KamareImageViewer instances as needed
     self:onDispatcherRegisterActions()
+
+    -- Take the Bluetooth pager over as early as possible: the device is shared
+    -- with the whole process, and a later reader must find it already attached.
+    pcall(Pager.start)
+
     self.ui.menu:registerToMainMenu(self)
+end
+
+-- Coming back from suspend: the pager's node may have been deleted and
+-- recreated while we slept, so rescan immediately (spec 01 A2).
+function Kamare:onResume()
+    pcall(Pager.on_resume)
 end
 
 function Kamare:loadCoverBrowserModules()

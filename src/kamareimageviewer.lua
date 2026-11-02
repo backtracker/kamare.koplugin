@@ -18,6 +18,7 @@ local KamareOptions = require("kamareoptions")
 local Configurable = require("frontend/configurable")
 local BookSettings = require("kamarebooksettings")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local Pager = require("kamarepager")
 local TitleBar = require("ui/widget/titlebar")
 local Geom = require("ui/geometry")
 local VirtualImageDocument = require("virtualimagedocument")
@@ -269,6 +270,9 @@ function KamareImageViewer:init()
     self:_updateDimensions()
 
     self:registerKeyEvents()
+    -- Only the rescan loop is page-scoped; the device itself stays attached
+    -- for the whole process (spec 01 A1), so leaving a chapter never detaches.
+    Pager.watch_page()
     self:setupTitleBar()
     self:initConfigGesListener()
 
@@ -808,13 +812,35 @@ function KamareImageViewer:setZoomMode(mode)
     return true
 end
 
+--- 诊断：记录阅读页实际收到的 KeyPress 键名。
+--- 真机上出现过「KOReader 自己的阅读器能用音量键翻页，Kamare 里不行」，
+--- 这行能区分是「KeyPress 没到阅读页」还是「到了但 key_events 没匹配上」。
+function KamareImageViewer:onKeyPress(key)
+    pcall(function() Pager.note_keypress(key and key.key or "?") end)
+    return InputContainer.onKeyPress(self, key)
+end
+
 function KamareImageViewer:registerKeyEvents()
-    if not Device:hasKeys() then return end
+    -- A Bluetooth pager shows up as an ordinary evdev keyboard. On touch-only
+    -- devices (Kindle PW2/PW5, most Kobos) Device:hasKeys() stays false even
+    -- after kamarepager takes the node over, so gating on it here made the
+    -- pager silently do nothing. Registering unconditionally is harmless:
+    -- these keys only arrive once a keyboard is actually attached.
     self.key_events = {
         Close         = { { Device.input.group.Back } },
-        ShowPrevImage = { { Device.input.group.PgBack } },
-        ShowNextImage = { { Device.input.group.PgFwd } },
+        -- 方向键也算翻页：部分遥控器/键盘发的是 DPAD
+        -- （KOReader 的 android/event_map 把它们映射成 Up/Down/Left/Right）。
+        ShowPrevImage = { { Device.input.group.PgBack }, { "Up" }, { "Left" } },
+        ShowNextImage = { { Device.input.group.PgFwd }, { "Down" }, { "Right" } },
     }
+end
+
+-- Page turns routed by another plugin. ko-pageturner swallows the key itself
+-- and broadcasts `GotoViewRel` instead of pressing a native page key, so this
+-- is the only path that still turns pages when both plugins are installed.
+-- Consuming it also keeps the event from reaching a ReaderUI underneath us.
+function KamareImageViewer:onGotoViewRel(diff)
+    return Pager.view_rel(self, diff)
 end
 
 function KamareImageViewer:setupTitleBar()
@@ -1084,11 +1110,67 @@ function KamareImageViewer:initConfigGesListener()
             },
             handler = function() return self:onTapMinibar() end,
         },
+        {
+            -- 阅读中也能用的翻页器入口：长按屏幕顶部 8%。
+            -- 书是从月读打开的、进不去 kamare 书库时，用它做诊断。
+            id = "kamare_pager_hold",
+            ges = "hold",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 0.08,
+            },
+            handler = function() return self:onPagerMenu() end,
+        },
     })
 end
 
 function KamareImageViewer:onTapMenu()
     self:toggleTitleBar()
+    return true
+end
+
+--- 阅读页里的翻页器菜单（长按顶部 8% 打开）。
+--- 不依赖 kamare 书库，所以在月读里打开的书也能用。
+function KamareImageViewer:onPagerMenu()
+    local dialog
+    local function close() UIManager:close(dialog) end
+    dialog = ButtonDialog:new{
+        title = _("Pager"),
+        buttons = {
+            {{
+                text = _("Pager keys"),
+                callback = function()
+                    close()
+                    Pager.show_bindings()
+                end,
+            }},
+            {{
+                text = _("Pager diagnostics"),
+                callback = function()
+                    close()
+                    Pager.show_diagnostics()
+                end,
+            }},
+            {{
+                text = _("Sniff pager keys (30s)"),
+                callback = function()
+                    close()
+                    Pager.sniff_for(30)
+                end,
+            }},
+            {{
+                text = _("Save pager diagnostics to file"),
+                callback = function()
+                    close()
+                    local path, err = Pager.save_diagnostics()
+                    UIManager:show(InfoMessage:new{
+                        text = path and (_("Saved to") .. ":\n" .. tostring(path))
+                            or (_("Save failed") .. ": " .. tostring(err)),
+                    })
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
     return true
 end
 
@@ -3685,6 +3767,9 @@ function KamareImageViewer:onClose()
 end
 
 function KamareImageViewer:onCloseWidget()
+    -- Stop the pager rescan loop; the attached fd is intentionally kept (the
+    -- device is shared with the rest of the process).
+    Pager.unwatch_page()
     -- Release the singleton slot, but only if it still points at us.
     if KamareImageViewer.active_instance == self then
         KamareImageViewer.active_instance = nil

@@ -988,3 +988,258 @@ msgstr "缓存未读章节"
 
 msgid "No unread chapters"
 msgstr "没有未读章节"
+
+msgid "Pager"
+msgstr "翻页器"
+
+msgid "Pager keeps disconnecting, reconnect paused"
+msgstr "翻页器反复断开，已暂停重连"
+
+msgid "No pager found"
+msgstr "未发现翻页器"
+
+msgid "Sharing %1 (taken over by another plugin)"
+msgstr "借道使用 %1（已被其他插件接管）"
+
+msgid "Connected: %1"
+msgstr "已接管：%1"
+
+msgid "Bluetooth pager status"
+msgstr "蓝牙翻页器状态"
+
+msgid "Enable pager"
+msgstr "启用翻页器"
+
+msgid "Default on. Turning it off releases the device."
+msgstr "默认开启。关闭会释放设备。"
+
+msgid "Rescan now"
+msgstr "立即重新扫描"
+
+msgid "Keys"
+msgstr "键位"
+
+msgid "Next = %1 / Previous = %2"
+msgstr "下一页 = %1 / 上一页 = %2"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Pager is off"
+msgstr "翻页器已关闭"
+
+msgid "Last key"
+msgstr "最近按键"
+
+msgid "No key received yet"
+msgstr "还没有收到按键"
+
+msgid "bound: next page"
+msgstr "已绑定：下一页"
+
+msgid "bound: previous page"
+msgstr "已绑定：上一页"
+
+msgid "not bound"
+msgstr "未绑定"
+
+msgid "Press a pager key to see its code."
+msgstr "按一下翻页器的按键，这里会显示它的键码。"
+
+msgid "State"
+msgstr "状态"
+
+msgid "Enabled"
+msgstr "总开关"
+
+msgid "Input backend"
+msgstr "输入后端"
+
+msgid "Input nodes"
+msgstr "输入节点"
+
+msgid "Last error"
+msgstr "最近错误"
+
+msgid "Pager diagnostics"
+msgstr "翻页器诊断"
+
+msgid "Live key test and input-node list"
+msgstr "实时按键测试与输入节点清单"
+
+msgid "Bound codes"
+msgstr "已绑定的键码"
+
+msgid "Recent keys"
+msgstr "最近按键记录"
+
+msgid "Save pager diagnostics to file"
+msgstr "保存翻页器诊断到文件"
+
+msgid "Saved to"
+msgstr "已保存到"
+
+msgid "Save failed"
+msgstr "保存失败"
+
+msgid "Sniff pager keys (30s)"
+msgstr "按键嗅探（30 秒）"
+
+msgid "Press every pager button now; the diagnostics page opens after 30 seconds."
+msgstr "现在请按下翻页器上的每一个键，30 秒后自动打开诊断页。"
+
+msgid "Sniff unavailable"
+msgstr "无法嗅探"
+
+msgid "Android: keys are delivered by the system"
+msgstr "Android：按键由系统直接送入"
+
+msgid "Android: no input node to take over; keys arrive directly."
+msgstr "Android：没有可接管的输入节点，按键由系统直接送入。"
+
+msgid "Pager keys"
+msgstr "翻页器按键"
+
+msgid "Add a key (press it now)"
+msgstr "添加按键（现在按一下）"
+
+msgid "Remove key %1"
+msgstr "删除按键 %1"
+
+msgid "Back"
+msgstr "返回"
+
+msgid "Reset to defaults"
+msgstr "恢复默认"
+
+msgid "Next page: %1"
+msgstr "下一页：%1"
+
+msgid "Previous page: %1"
+msgstr "上一页：%1"
+
+msgid "Bound %1 to key %2"
+msgstr "已把 %1 绑定到键 %2"
+
+msgid "Key %1 is already bound to %2"
+msgstr "键 %1 已经绑给 %2 了"
+
+msgid "Could not bind key %1 (%2)"
+msgstr "无法绑定键 %1（%2）"
+
+msgid "Press the key for %1 now (15 seconds)."
+msgstr "请按一下 %1 的键（15 秒内）"
+
+msgid "None"
+msgstr "无"
+
+msgid "next"
+msgstr "下一页"
+
+msgid "previous"
+msgstr "上一页"
+
+msgid "No key received in %1 seconds: this button never reaches KOReader."
+msgstr "%1 秒内没有收到任何按键：这颗键根本没进 KOReader。"
+
+msgid "Next page"
+msgstr "下一页"
+
+msgid "Previous page"
+msgstr "上一页"
+
+msgid "Android media grab"
+msgstr "Android 媒体键接管"
+
+msgid "bound to %1"
+msgstr "已绑定：%1"
+
+msgid "binding rejected: %1"
+msgstr "绑定被拒绝：%1"
+
+msgid "ignored (repeat within 0.25 s)"
+msgstr "已忽略（0.25 秒内的重复按下）"
+
+msgid "handled by a dialog"
+msgstr "由对话框处理"
+
+msgid "turned: next page"
+msgstr "已翻页：下一页"
+
+msgid "turned: previous page"
+msgstr "已翻页：上一页"
+
+msgid "pager page is covered by another window"
+msgstr "阅读页被其它窗口盖住"
+
+msgid "no pager page open"
+msgstr "没有打开的阅读页"
+
+msgid "Pager page on top"
+msgstr "阅读页在最上层"
+
+msgid "Last result"
+msgstr "最近一次按键"
+
+msgid "Key subscribers"
+msgstr "按键订阅者"
+
+msgid "yes"
+msgstr "是"
+
+msgid "no (covered by another window)"
+msgstr "否（被其它窗口盖住）"
+
+msgid "no pager page"
+msgstr "没有阅读页"
+
+msgid "none"
+msgstr "无"
+
+msgid "Keys are only logged while this page is open; close it to test page turning."
+msgstr "打开本页时按键只记录、不翻页；要测翻页请先关掉本页。"
+
+msgid "not bound; handled by KOReader"
+msgstr "未绑定；交给 KOReader 自己处理"
+
+msgid "no change (already at the first/last page)"
+msgstr "没有变化（已经是第一页/最后一页）"
+
+msgid "Set pager keys (press twice)"
+msgstr "设置翻页键（按两下）"
+
+msgid "next page"
+msgstr "下一页"
+
+msgid "previous page"
+msgstr "上一页"
+
+msgid "Press the %1 button now (15 seconds)."
+msgstr "现在按【%1】那颗键（15 秒内）"
+
+msgid "Done: next = %1 · previous = %2"
+msgstr "完成：下一页 = %1 · 上一页 = %2"
+
+msgid "That is the same key as the next-page button. Press a different key."
+msgstr "这和「下一页」是同一颗键，请按另一颗。"
+
+msgid "%1 already uses key %2"
+msgstr "%1 已经用了键 %2"
+
+msgid "Key %1 already turns pages by itself; press another key."
+msgstr "键 %1 本来就能翻页（系统映射），换一颗键。"
+
+msgid "Press the two page keys now to try them."
+msgstr "现在按上下两颗翻页键试试。"
+
+msgid "KOReader event"
+msgstr "KOReader 收到后变成"
+
+msgid "Set up by pressing twice (next page, then previous)"
+msgstr "按两下重新设置（先下一页、再上一页）"
+
+msgid "Reader KeyPress"
+msgstr "阅读页收到的按键"
