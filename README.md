@@ -164,7 +164,7 @@ re-implementing any of it. See [What's new in 0.10](#pass-2--public-cache-api-fo
 for the capability list and error-code contract.
 
 Releases inject the plugin version into `kamareversion.lua`; a plain checkout
-reports `0.10.5-dev`. The cache API version is independent of the plugin
+reports `0.10.6-dev`. The cache API version is independent of the plugin
 version (`API_VERSION = 1`, plugin 0.10.x).
 
 ### Feature manifest
@@ -207,12 +207,33 @@ key codes, and turns pages with it. Works with or without Moon.
   at the input backend (and again at the keyboard handler, exactly once), so
   binding works there too; keys KOReader already maps to page turns are also
   handled directly, without relying on the reading page's key table.
+  KOReader's Android bridge also hands a few key classes back to the system
+  (media/headset/mute keys, and volume keys when *Ignore volume keys* is on), so
+  those never reach Lua at all. Kamare takes them over at
+  `AInputQueue_finishEvent` while you are binding a key — and afterwards for
+  codes you actually bound, plus the unambiguous previous/next media codes
+  (87/88), only while the manga page is on top. A remote whose left/right
+  buttons send such a code can therefore be bound. Power keys are never taken
+  over; volume keys and play/pause are only taken over when you bind them
+  explicitly.
+- **Remotes whose buttons act like a finger drag.** Some remotes — and the ring
+  keys of camera-style Android remotes — do not send a key code on a short
+  press at all: they send a quick pointer drag. That is why the same button
+  pages in KOReader's own reader but cannot be bound: there is no code to bind.
+  The Kamare viewer now registers a full-screen **swipe**: left/right, and (in
+  page/dual mode) up/down, turn pages. If the directions feel reversed for your
+  remote, long-press the top of the page → **Swipe page turn: normal/inverted**;
+  the choice persists and does not touch key bindings.
 - **Diagnosis built in.** Long-press the top of a reading page → **Pager
-  diagnostics**: state, backend, current bindings, the last key received, and
-  every input node with the full list of key codes it declares. The same menu
-  has a 30-second **key sniffer** that temporarily opens *every* input node
-  (needed on Kindle/Kobo for buttons that live on a node Kamare has not taken
-  over) and **Save pager diagnostics to file**.
+  diagnostics**: state, backend, current bindings, the last key received, the
+  last swipe (direction and action), and every input node with the full list of
+  key codes it declares. The same menu has a 30-second **key sniffer** that
+  temporarily opens *every* input node (needed on Kindle/Kobo for buttons that
+  live on a node Kamare has not taken over) and **Save pager diagnostics to
+  file**. On Android, where there is no node to open, the same entry reclaims
+  every key KOReader would hand back to the system for 30 seconds, shows its
+  code in **Recent keys**, and does not turn pages — the fastest way to find out
+  what a non-working button sends.
 - **Connection is not Kamare's job.** On Kindle the
   [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough)
   daemon turns the BLE remote into a virtual keyboard (Kamare starts the daemon
@@ -224,8 +245,8 @@ key codes, and turns pages with it. Works with or without Moon.
   Kamare handles the standard `GotoViewRel` event that pageturner broadcasts, so
   a page never turns twice.
 - **Not covered:** reading EPUBs/PDFs in KOReader's own reader (Kamare only
-  handles its own manga viewer), single-key pagers with gestures, and
-  hold-to-scroll. Those stay out of scope for now.
+  handles its own manga viewer) and hold-to-scroll. Those stay out of scope for
+  now.
 - Status: Kamare's own top-left menu → **Bluetooth pager status**. The
   enable/disable switch and **Rescan** live in Moon's settings
   (**Reader → Pager**); both read the same setting.

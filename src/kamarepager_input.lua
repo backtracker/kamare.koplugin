@@ -874,10 +874,17 @@ end
 --
 -- 这里不改任何文件：把 `android.lib` 换成一个代理表，只在
 -- `AInputQueue_finishEvent` 上挂一层。KOReader 已经决定**不处理**
--- （handled == 0）且键码属于媒体键时，才由我们接管并强制 handled = 1；
--- 其余按键、触摸完全走原路径，出问题最坏也只是回到「丢给系统」。
+-- （handled == 0）的键事件，由我们按 `want()` 决定要不要接管（接管就强制
+-- handled = 1）；其余按键、触摸完全走原路径，出问题最坏也只是回到「丢给系统」。
+-- `want()` 只在这几种情况下点头：正在等用户按键（捕获），或者这颗码已经绑过、
+-- 或者是语义明确的「上一首/下一首」（87/88，遥控器的左右键常发这个）；后两种
+-- 还要求 Kamare 阅读页就在最上层。所以平时不会抢系统音量和音乐控制。
 
--- AKEYCODE_MEDIA_*（85-91、126-130）。POWER / HEADSETHOOK 故意不在里面。
+-- AKEYCODE_MEDIA_*（85-91、126-130）。这些是最常见的一类，但**不是全部**：
+-- KOReader 的 `keyEventHandler` 还会 `return 0` 掉 HEADSETHOOK(79)、
+-- VOLUME_MUTE(164) 以及被「忽略音量键」挡下的 24/25。遥控器上那两颗
+-- 「左右翻页」很可能就落在这些码上 —— 只认 MEDIA_CODES 会让它们永远绑不上。
+-- 实际判定见 `grab_event`（不再按码过滤）；这张表保留给文档/诊断引用。
 PagerInput.MEDIA_CODES = {
     [85] = true,  -- MEDIA_PLAY_PAUSE
     [86] = true,  -- MEDIA_STOP
@@ -893,7 +900,45 @@ PagerInput.MEDIA_CODES = {
     [130] = true, -- MEDIA_RECORD
 }
 
+-- 唯一不碰的键：AKEYCODE_POWER(26)。系统本来就不把它交给第三方应用，
+-- 硬吃可能在部分设备上影响关机/锁屏。
+PagerInput.NEVER_GRAB = {
+    [26] = true, -- AKEYCODE_POWER
+}
+
+-- 系统音量键：只有用户**显式绑过**才从系统手里拿（`android_wants` 只在
+-- `action_by_code` 里有它时才收）。否则「忽略音量键」打开时我们会把它当成
+-- 翻页键，等于悄悄覆盖用户自己的设置。这张表给文档/诊断引用。
+PagerInput.VOLUME_CODES = {
+    [24] = true,  -- VOLUME_UP
+    [25] = true,  -- VOLUME_DOWN
+    [164] = true, -- VOLUME_MUTE
+}
+
+-- 不用绑定就该生效的 Android 码：只有语义明确是「上一首/下一首」的两颗
+-- （MEDIA_PREVIOUS / MEDIA_NEXT）—— 遥控器的左右翻页键常常就是它们。
+-- 播放/暂停、停止、静音这些能当中间键用，但它们同时也是音乐控制：
+-- 不自动抢，用户真要拿它翻页时自己绑。
+PagerInput.AUTO_GRAB_CODES = {
+    [87] = true, -- MEDIA_NEXT
+    [88] = true, -- MEDIA_PREVIOUS
+}
+
 local grab
+
+-- AINPUT_EVENT_TYPE_*（NDK 常量，不依赖 C 头文件）
+local AINPUT_EVENT_TYPE_KEY = 1
+local AINPUT_EVENT_TYPE_MOTION = 2
+local GRAB_RECENT_MAX = 16
+
+local function grab_record(g, etype, code, action, handled)
+    local seen = g.seen
+    seen[etype] = (seen[etype] or 0) + 1
+    local raw = { type = etype, code = code, action = action, handled = handled }
+    g.last_raw = raw
+    g.recent[#g.recent + 1] = raw
+    if #g.recent > GRAB_RECENT_MAX then table.remove(g.recent, 1) end
+end
 
 local function grab_drain(g)
     g.scheduled = false
@@ -919,23 +964,42 @@ local function grab_schedule(g)
     end
 end
 
---- 读一个 AInputEvent：是媒体键返回 code, value，否则 nil。
-local function grab_decode(g, event)
+--- 读一个 AInputEvent：键事件返回 code, value，否则 nil。
+---
+--- 这里**不再按码过滤**。桥把事件还给系统时（`handled == 0`）Lua 侧永远看不到，
+--- 媒体键、HEADSETHOOK、静音键、被忽略的音量键都是这一类；翻页器发什么码事先
+--- 并不知道，只放 MEDIA_CODES 会让「左右翻页」这种偏门码永远绑不上。
+--- 要不要真的吃掉交给 `want()`（捕获中 / 已绑定且阅读页在最上层）决定。
+---
+--- 另外：KOReader 自己处理掉的键（方向键、翻页键……，`handled ~= 0`）也照样记进
+--- `recent`，诊断页才能回答「这颗键到底是不是键事件」。绑定期间再补喂一次，
+--- 这样即使 Lua 钩子没装上（inhibitInput 抢走 handleKeyBoardEv 等），也能绑。
+local function grab_event(g, event, handled)
     local lib = g.lib
-    if lib.AInputEvent_getType(event) ~= 1 then return nil end -- AINPUT_EVENT_TYPE_KEY
+    local etype = lib.AInputEvent_getType(event)
+    if etype ~= AINPUT_EVENT_TYPE_KEY then
+        grab_record(g, etype, nil, nil, handled)
+        return false
+    end
+    local code = lib.AKeyEvent_getKeyCode(event)
     local action = lib.AKeyEvent_getAction(event)
+    grab_record(g, etype, code, action, handled)
+    if PagerInput.NEVER_GRAB[code] then return false end
     local value
     if action == 0 then value = 1          -- AKEY_EVENT_ACTION_DOWN
     elseif action == 1 then value = 0      -- AKEY_EVENT_ACTION_UP
-    else return nil end                    -- MULTIPLE
-    local code = lib.AKeyEvent_getKeyCode(event)
-    if not PagerInput.MEDIA_CODES[code] then return nil end
-    return code, value
-end
+    else return false end                  -- MULTIPLE
 
-local function grab_event(g, event)
-    local code, value = grab_decode(g, event)
-    if not code then return false end
+    if handled ~= 0 then
+        -- KOReader 已经处理了这颗键：平时绝不重复喂（会翻两次），
+        -- 只有「正在绑定」时补喂一次，让绑定不依赖 Lua 钩子是否还在链上。
+        if value == 1 and g.observe and g.observe(code, value) then
+            g.queue[#g.queue + 1] = { code = code, value = value }
+            grab_schedule(g)
+        end
+        return false
+    end
+
     if value == 1 then
         if not g.want(code, value) then return false end
         g.held[code] = (g.held[code] or 0) + 1
@@ -945,6 +1009,7 @@ local function grab_event(g, event)
         g.held[code] = g.held[code] - 1
     end
     g.grabbed = g.grabbed + 1
+    g.last = code
     g.queue[#g.queue + 1] = { code = code, value = value }
     grab_schedule(g)
     return true
@@ -958,13 +1023,31 @@ function PagerInput.android_grab_count()
     return grab and grab.grabbed or 0
 end
 
+--- 最近一颗被我们从系统手里捞回来的键码（诊断用）。
+function PagerInput.android_grab_last()
+    return grab and grab.last or nil
+end
+
 function PagerInput.android_grab_error()
     return grab and grab.error or nil
 end
 
+--- 最近一次从 `AInputQueue_finishEvent` 看到的原始事件（诊断用）。
+function PagerInput.android_grab_raw()
+    if not grab then return nil end
+    return {
+        key = grab.seen[AINPUT_EVENT_TYPE_KEY] or 0,
+        motion = grab.seen[AINPUT_EVENT_TYPE_MOTION] or 0,
+        other = (grab.seen[0] or 0) + (grab.seen[3] or 0),
+        last = grab.last_raw,
+    }
+end
+
 --- 安装 Android 媒体键劫持。`want(code, value)` 同步决定要不要这颗键，
 --- `dispatch(code, value)` 延后执行（会走 feed()）。
-function PagerInput.install_android_grab(want, dispatch)
+--- `observe(code, value)` 只在「KOReader 已处理的键」上调用，返回真表示
+--- 现在正在绑定、需要补喂一次（不改 handled，不抢系统）。
+function PagerInput.install_android_grab(want, dispatch, observe)
     if grab then return grab.error == nil, grab.error end
     if not PagerInput.is_android() then return false, "not_android" end
     if type(want) ~= "function" or type(dispatch) ~= "function" then
@@ -983,16 +1066,17 @@ function PagerInput.install_android_grab(want, dispatch)
 
     grab = {
         android = android, lib = lib, orig = orig,
-        want = want, dispatch = dispatch,
+        want = want, dispatch = dispatch, observe = observe,
         held = {}, queue = {}, grabbed = 0, scheduled = false,
+        seen = {}, recent = {}, last_raw = nil,
     }
 
     local proxy = setmetatable({}, {
         __index = function(_, key) return lib[key] end,
     })
     proxy.AInputQueue_finishEvent = function(queue, event, handled)
-        if handled == 0 and grab and not grab.error then
-            local ok, took = pcall(grab_event, grab, event)
+        if grab and not grab.error then
+            local ok, took = pcall(grab_event, grab, event, handled)
             if ok then
                 if took then handled = 1 end
             else

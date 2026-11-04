@@ -1120,6 +1120,17 @@ function KamareImageViewer:initConfigGesListener()
             },
             handler = function() return self:onPagerMenu() end,
         },
+        {
+            -- 遥控器/翻页器的「单击」在 Android 上是一条指针拖动，不是 keycode：
+            -- KOReader 原生阅读器就是靠 swipe 翻页的。Kamare 之前只注册了
+            -- tap/hold，所以同一颗键原生阅读器能翻、这里不能，也绑不上。
+            id = "kamare_swipe",
+            ges = "swipe",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1,
+            },
+            handler = function(ges) return self:onSwipe(nil, ges) end,
+        },
     })
 end
 
@@ -1155,6 +1166,23 @@ function KamareImageViewer:onPagerMenu()
                 callback = function()
                     close()
                     Pager.sniff_for(30)
+                end,
+            }},
+            {{
+                -- 遥控器的「右」键让指针向右滑，和触屏「左滑 = 下一页」相反。
+                -- 方向反了不用等新包，这里当场翻过来。
+                text = Pager.swipe_flipped()
+                    and _("Swipe page turn: inverted (tap to restore)")
+                    or _("Swipe page turn: normal (tap to invert)"),
+                callback = function()
+                    local flipped = Pager.toggle_swipe_flipped()
+                    close()
+                    UIManager:show(InfoMessage:new{
+                        text = flipped
+                            and _("Swipe right = next page, swipe left = previous page.")
+                            or _("Swipe left = next page, swipe right = previous page."),
+                        timeout = 2,
+                    })
                 end,
             }},
             {{
@@ -2961,8 +2989,9 @@ function KamareImageViewer:kickPrefetchChain()
 end
 
 function KamareImageViewer:onSwipe(_, ges)
-    local dir = ges.direction
-    local dist = ges.distance
+    local dir = ges and ges.direction
+    if not dir then return false end
+    local dist = ges.distance or 0
 
     if dir == "north" then
         if self.view_mode == 1 then
@@ -2982,11 +3011,25 @@ function KamareImageViewer:onSwipe(_, ges)
                 end
             end
             self:_scrollBy(dist)
+            return true
         end
     elseif dir == "south" then
         if self.view_mode == 1 then
             self._reached_end = false
             self:_scrollBy(-dist)
+            return true
+        end
+    end
+
+    -- 不是滚动模式（或左右划动）：当成翻页。遥控器的单击就是这条路径，
+    -- 绑定只认 keycode，所以「绑不上」的键只有在这里才能用。
+    local action = Pager.swipe_action(dir, Pager.swipe_flipped())
+    if action then
+        Pager.note_swipe(dir, action)
+        if action == "next" then
+            self:onShowNextImage()
+        else
+            self:onShowPrevImage()
         end
     end
 

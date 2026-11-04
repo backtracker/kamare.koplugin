@@ -57,14 +57,6 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local PagerInput = require("kamarepager_input")
 
---- device 懒加载：spec 环境里没有真实 device，模块加载期不能硬 require。
-local function is_android()
-    local ok, dev = pcall(require, "device")
-    if not ok or not dev or type(dev.isAndroid) ~= "function" then return false end
-    local ok2, result = pcall(function() return dev.isAndroid(dev) end)
-    return ok2 and result or false
-end
-
 local Pager = {}
 
 Pager.api_version = 1
@@ -82,6 +74,9 @@ local DEFAULT_BINDINGS = { next = { 109 }, prev = { 104 } }
 -- 一个动作最多绑几颗键：防手滑，也保证诊断页显示得下。
 local MAX_BINDINGS = 8
 local GUARD = 0.25
+-- 绑定成功后多久内忽略同一颗键（Android 的 grab 补喂与 KOReader 原生事件
+-- 可能各来一份，间隔通常只有几十毫秒）。
+local CAPTURE_GRACE = 1.5
 
 local function copy_list(list)
     local out = {}
@@ -114,6 +109,17 @@ local state = {
     seq = 0,
     guard_until = {},   -- fd -> timestamp
     swallowing = {},    -- "fd:code" -> true（按下被吃掉后，松开/重复也一起吃掉）
+    -- Android 诊断嗅探的截止时刻：这段时间内把所有原本丢给系统的键捞回来
+    -- 记一笔（不翻页），让诊断页能看见「按了但没反应」的那颗键是什么码。
+    android_sniff_until = nil,
+    -- 刚绑定成功的码 -> 截止时刻。Android 上同一颗键可能从两条路各来一次
+    -- （grab 补喂 + KOReader 自己那条），绑定完的 1.5 s 内不再执行动作。
+    captured_at = {},
+    -- 手势翻页的计数（诊断用）。遥控器的「单击」在 Android 上是一条指针
+    -- 拖动而不是 keycode，只能从阅读页的 swipe 手势里接。
+    swipe = { count = 0, last = nil, last_action = nil },
+    -- 嗅探窗口的代号：重复开启时旧定时器不能再把新窗口关掉。
+    sniff_gen = 0,
     started = false,
 }
 
@@ -143,6 +149,19 @@ end
 local function now()
     if deps.now then return deps.now() end
     return require("ffi/util").getTimestamp()
+end
+
+--- Android 诊断嗅探是否在窗口内：只认 `Pager.sniff_for()` 打开的那一段，
+--- 到期自动失效（不依赖调度器回调，免得它被别的窗口吞掉后一直开着）。
+local function android_sniffing()
+    local until_ts = state.android_sniff_until
+    if until_ts == nil then return false end
+    if now() > until_ts then
+        -- 顺手清掉过期时间，诊断页不会一直显示一个早就结束的窗口。
+        state.android_sniff_until = nil
+        return false
+    end
+    return true
 end
 
 local function read_settings()
@@ -225,6 +244,10 @@ function Pager._reset()
     state.guard_until = {}
     state.swallowing = {}
     state.capture = nil
+    state.android_sniff_until = nil
+    state.captured_at = {}
+    state.swipe = { count = 0, last = nil, last_action = nil }
+    state.sniff_gen = (state.sniff_gen or 0) + 1
     state.seq = 0
     state.started = false
     state.last_result = nil
@@ -251,6 +274,70 @@ function Pager.view_rel(viewer, diff)
     end
     -- 始终消费：否则事件会继续下沉，翻到 ReaderUI 底下那本书。
     return true
+end
+
+----------------------------------------------------------------------------
+-- 手势翻页
+----------------------------------------------------------------------------
+
+-- 遥控器的「单击」在 Android 上不是 keycode，而是一条指针拖动（手势）。
+-- KOReader 原生阅读器就是靠 swipe 翻页的，Kamare 阅读页之前只注册了 tap/hold，
+-- 所以按了没反应、也绑不上。这里把方向映射成动作，逻辑留在门面里方便测试。
+local SWIPE_ACTIONS = {
+    west  = "next", -- 触屏惯例：左滑 = 下一页
+    east  = "prev",
+    north = "prev", -- 与阅读页按键表一致：Up = 上一页
+    south = "next", -- Down = 下一页
+}
+
+--- `flipped` 只翻转左右：遥控器上的「右」键让指针向右滑，
+--- 和触屏「左滑 = 下一页」正好相反；上下不翻转，免得和屏幕滚动打架。
+function Pager.swipe_action(direction, flipped)
+    local action = SWIPE_ACTIONS[direction]
+    if not action then return nil end
+    if flipped and (direction == "west" or direction == "east") then
+        return action == "next" and "prev" or "next"
+    end
+    return action
+end
+
+--- 诊断用：记下一次手势翻页。
+function Pager.note_swipe(direction, action)
+    state.swipe.count = state.swipe.count + 1
+    state.swipe.last = direction
+    state.swipe.last_action = action
+end
+
+function Pager.swipe_state()
+    return {
+        count = state.swipe.count,
+        last = state.swipe.last,
+        last_action = state.swipe.last_action,
+    }
+end
+
+local SWIPE_FLIP_KEY = "kamare_swipe_flip"
+
+--- 左右方向是否翻转。遥控器和触屏的习惯相反，做成运行时开关，
+--- 用户不用为方向反了再等一个新包。
+function Pager.swipe_flipped()
+    if not G_reader_settings then return false end
+    local ok, value = pcall(function() return G_reader_settings:isTrue(SWIPE_FLIP_KEY) end)
+    return ok and value == true
+end
+
+function Pager.set_swipe_flipped(flipped)
+    if not G_reader_settings then return false end
+    return pcall(function()
+        G_reader_settings:saveSetting(SWIPE_FLIP_KEY, flipped and true or false)
+        G_reader_settings:flush()
+    end)
+end
+
+function Pager.toggle_swipe_flipped()
+    local flipped = not Pager.swipe_flipped()
+    Pager.set_swipe_flipped(flipped)
+    return flipped
 end
 
 --- Kamare 阅读页是不是最上层？盖着菜单/对话框时不吃键，
@@ -345,6 +432,9 @@ function Pager._dispatch(ev)
                 local action = state.capture.action
                 local callback = state.capture.callback
                 state.capture = nil
+                -- 同一颗键在 Android 上可能从 grab 和 KOReader 各来一次：
+                -- 绑定完成后的一小段时间内不再执行动作，免得「绑一下就翻页」。
+                state.captured_at[code] = now() + CAPTURE_GRACE
                 local ok, err = Pager.add_binding(action, code)
                 if ok then
                     logger.info(string.format("[kamarepager] captured %s = %d", tostring(action), code))
@@ -361,6 +451,18 @@ function Pager._dispatch(ev)
                 if callback then pcall(callback, action, code, ok, err) end
                 return true
             end
+        end
+
+        -- 绑定刚吃掉的那颗键：别让同一物理按下的第二份事件翻页。
+        if state.captured_at[code] and now() < state.captured_at[code] then
+            return true
+        end
+
+        -- Android 诊断嗅探：这颗键原本会被 KOReader 交还系统（Lua 看不到），
+        -- 现在捞回来只记一笔给诊断页看，不翻页、也不改绑定。
+        if android_sniffing() then
+            note_result(_("sniffed for diagnostics (no page turn)"))
+            return true
         end
 
         -- 一次物理按下只许翻一页：动作后 0.25 s 内从同一个来源来的按下丢掉。
@@ -605,22 +707,37 @@ local function android_wants(code)
     if not state.enabled then return false end
     -- 绑定模式：这颗键就是用来绑的，一定收。
     if Pager.capture_active() then return true end
+    -- 诊断嗅探：这段时间内 KOReader 丢给系统的键全收（只记录、不翻页）。
+    if android_sniffing() then return true end
     local action = state.action_by_code[code]
-    if not action then return false end
-    -- 只有现在真的会翻页才从系统手里拿走；盖着菜单/对话框时照旧放行。
+    if action then
+        -- 只有现在真的会翻页才从系统手里拿走；盖着菜单/对话框时照旧放行。
+        local viewer = active_viewer()
+        return viewer ~= nil and viewer_on_top(viewer)
+    end
+    -- 没显式绑定，但这颗码 KOReader 自己就映射成翻页键、且语义明确是
+    -- 「上一首 / 下一首」（Android 的 87/88）：抓到就能直接翻页 ——
+    -- 这正是「进 Kamare 就能用、不用先绑」的那条路。
+    if not PagerInput.AUTO_GRAB_CODES[code] then return false end
     local viewer = active_viewer()
-    return viewer ~= nil and viewer_on_top(viewer)
+    if not viewer or not viewer_on_top(viewer) then return false end
+    return PagerInput.default_action_for(code) ~= nil
 end
 
 local function android_dispatch(code, value)
     PagerInput.feed{ code = code, value = value, media = true }
 end
 
+--- KOReader 已经处理掉的键（方向/翻页键）：平时不重复喂，只有绑定中补喂。
+local function android_observe(code, value)
+    return value == 1 and Pager.capture_active()
+end
+
 local function ensure_android_grab()
     if not PagerInput.is_android() then return true end
     -- 这段会碰 android.lib 这种 C 库对象，任何意外都不许把 Pager.start 带走。
     local ok, installed, err = pcall(PagerInput.install_android_grab,
-        android_wants, android_dispatch)
+        android_wants, android_dispatch, android_observe)
     if not ok then
         logger.warn("[kamarepager] android media grab crashed: " .. tostring(installed))
         return false
@@ -678,8 +795,14 @@ end
 
 --- 阅读页打开 / 关闭：只在页面存活期间跑轻扫。
 function Pager.watch_page()
+    -- 书可以从月读桌面直接打开，这时 Kamare 插件自己的 init（`Pager.start`）
+    -- 可能一次都没跑过 —— 少了它，Android 的「把丢给系统的键捞回来」那一层
+    -- 不会装上，媒体键/耳机键/静音键就永远到不了 feed()，表现是「怎么按都绑不上」。
+    -- start() 是幂等的，这里补一次。
+    if not state.started then pcall(Pager.start) end
     if not state.enabled then return end
     PagerInput.set_handler(Pager._dispatch)
+    ensure_android_grab()
     PagerInput.attach()
     PagerInput.start_loop()
 end
@@ -756,7 +879,7 @@ function Pager.diagnose()
         _("Input backend") .. ": open=" .. tostring(PagerInput.can_open())
             .. " · handler=" .. tostring(PagerInput.handler_installed())
             .. " · hook=" .. tostring(PagerInput.hook_installed())
-            .. (is_android() and (" · backend=" .. tostring(PagerInput.backend_hooked())) or "")
+            .. (PagerInput.is_android() and (" · backend=" .. tostring(PagerInput.backend_hooked())) or "")
             .. (PagerInput.sniff_active() and " · sniffing" or "")
             .. (state.capture and (" · capture=" .. tostring(state.capture.action)) or ""),
         _("Keys") .. ": " .. _("next") .. "=" .. table.concat(bindings.next, ",")
@@ -764,6 +887,11 @@ function Pager.diagnose()
         _("Last key") .. ": " .. Pager.last_key_text(),
         _("Pager page on top") .. ": " .. on_top_text(),
         _("Last result") .. ": " .. tostring(state.last_result or _("none")),
+        _("Swipe gestures") .. ": " .. (state.swipe.count > 0
+            and (tostring(state.swipe.last) .. " → " .. tostring(state.swipe.last_action or "?"))
+            or _("none"))
+            .. " · " .. tostring(state.swipe.count)
+            .. " · " .. (Pager.swipe_flipped() and _("left/right inverted") or _("left/right normal")),
         _("Key subscribers") .. ": " .. tostring(Pager.subscriber_count()),
     }
     -- 列出所有已绑定的码，方便确认「这颗键到底绑没绑」。
@@ -787,7 +915,7 @@ function Pager.diagnose()
     if PagerInput.last_error then
         lines[#lines + 1] = _("Last error") .. ": " .. tostring(PagerInput.last_error)
     end
-    if is_android() then
+    if PagerInput.is_android() then
         lines[#lines + 1] = _("Android: no input node to take over; keys arrive directly.")
         lines[#lines + 1] = _("KOReader event") .. ": "
             .. tostring(PagerInput.last_passthrough or "-")
@@ -796,8 +924,24 @@ function Pager.diagnose()
         lines[#lines + 1] = _("Android media grab") .. ": "
             .. (PagerInput.android_grab_installed() and "on" or "off")
             .. " · " .. tostring(PagerInput.android_grab_count())
+            .. " · last=" .. tostring(PagerInput.android_grab_last() or "-")
             .. (PagerInput.android_grab_error()
                 and (" · " .. tostring(PagerInput.android_grab_error())) or "")
+        local raw = PagerInput.android_grab_raw()
+        if raw then
+            local last = raw.last
+            lines[#lines + 1] = _("Android raw events") .. ": key=" .. tostring(raw.key)
+                .. " motion=" .. tostring(raw.motion)
+                .. " other=" .. tostring(raw.other)
+                .. " · last=" .. (last and string.format(
+                    "type=%s code=%s action=%s handled=%s",
+                    tostring(last.type), tostring(last.code),
+                    tostring(last.action), tostring(last.handled)) or "-")
+        end
+        if android_sniffing() then
+            lines[#lines + 1] = _("Android sniff") .. ": on · "
+                .. string.format("%ds", math.max(0, math.ceil(state.android_sniff_until - now())))
+        end
     end
     lines[#lines + 1] = ""
     lines[#lines + 1] = _("Input nodes") .. ":"
@@ -846,17 +990,37 @@ end
 --- 用来回答「这颗键到底从哪个节点、以什么码发出来」。
 function Pager.sniff_for(seconds)
     seconds = tonumber(seconds) or 30
+    if PagerInput.is_android() then
+        -- Android 没有输入节点可开，而且 KOReader 的桥会把一部分键（媒体键、
+        -- 耳机键、静音键……）直接还给系统，Lua 连看都看不到。这里换成
+        -- 「诊断嗅探」：这段时间内把这些键全部捞回来，记进「最近按键」但不翻页。
+        if not state.enabled then return nil, "disabled" end
+        if not state.started then pcall(Pager.start) end
+        ensure_android_grab()
+        -- 每次开启都换一代：重复点「嗅探」时，上一轮的定时器不能把新窗口提前关掉。
+        state.sniff_gen = (state.sniff_gen or 0) + 1
+        local gen = state.sniff_gen
+        state.android_sniff_until = now() + seconds
+        pcall(function()
+            require("ui/uimanager"):scheduleIn(seconds, function()
+                if state.sniff_gen == gen then
+                    state.android_sniff_until = nil
+                end
+            end)
+        end)
+        -- 立刻打开诊断页：按一下刷新一下，「最近按键」里直接能看到码。
+        Pager.show_diagnostics()
+        return true
+    end
     local ok, err = PagerInput.start_sniff()
     if not ok then
-        -- Android 上没什么可嗅探的：键本来就直接到 KOReader，直接看诊断页。
-        if err == "android" then
-            Pager.show_diagnostics()
-            return true
-        end
         return nil, err
     end
+    state.sniff_gen = (state.sniff_gen or 0) + 1
+    local gen = state.sniff_gen
     pcall(function()
         require("ui/uimanager"):scheduleIn(seconds, function()
+            if state.sniff_gen ~= gen then return end
             PagerInput.stop_sniff()
             Pager.show_diagnostics()
         end)
@@ -865,6 +1029,8 @@ function Pager.sniff_for(seconds)
 end
 
 function Pager.sniff_stop()
+    state.sniff_gen = (state.sniff_gen or 0) + 1
+    state.android_sniff_until = nil
     return PagerInput.stop_sniff()
 end
 
@@ -970,25 +1136,11 @@ function Pager.show_setup_wizard()
                         UIManager:scheduleIn(0.6, function() ask() end)
                         return
                     end
-                    -- KOReader 自己认得、并且已经是翻页键的码（Android 的音量键等）：
-                    -- 绑了也不会经过我们（兜底层不敢再翻一次），直接说清楚。
-                    local mapped
-                    do
-                        local ok_dev, dev = pcall(require, "device")
-                        if ok_dev and dev and dev.input and type(dev.input.event_map) == "table" then
-                            mapped = dev.input.event_map[code]
-                        end
-                    end
-                    if mapped == "LPgBack" or mapped == "LPgFwd"
-                        or mapped == "RPgBack" or mapped == "RPgFwd" then
-                        UIManager:show(InfoMessage:new{
-                            text = T(_("Key %1 already turns pages by itself; press another key."), code),
-                            timeout = 4,
-                        })
-                        UIManager:scheduleIn(2.0, function() ask() end)
-                        return
-                    end
-                    -- 「已经绑在这个动作上」不算失败：用户上次就配好了。
+                    -- KOReader 自己认得、并且已经是翻页键的码（Android 的音量键等）
+                    -- 也照样允许绑定：在 Kamare 里真正生效的是显式绑定，
+                    -- 「本来就认得」不等于「在漫画页里会翻页」——之前在这里直接拒绝，
+                    -- 用户就卡在「这颗键绑不上」的死角。绑上不会翻两次（_dispatch
+                    -- 命中显式绑定就 return true）。
                     if index == 1 then first_code = code end
                     local added, add_err = Pager.add_binding(step.action, code)
                     local already = (not added) and add_err == "duplicate"
@@ -1136,7 +1288,7 @@ function Pager.describe()
         text = _("Pager is off")
     elseif code == "flapping" then
         text = _("Pager keeps disconnecting, reconnect paused")
-    elseif is_android() and #PagerInput.devices() == 0 then
+    elseif PagerInput.is_android() and #PagerInput.devices() == 0 then
         -- Android 上键事件由系统直接送进 KOReader，没有可接管的 evdev 节点。
         text = _("Android: keys are delivered by the system")
     else

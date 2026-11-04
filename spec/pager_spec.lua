@@ -380,6 +380,15 @@ return function(t)
     t.eq(next_turns, before_next, "A17: capturing does not turn a page")
     t.eq(#Pager.bindings().next, 2, "A17: the captured key was appended")
 
+    -- 绑完的同一颗键在 Android 上还会从 grab 补喂一次：1.5 s 内只吞、不翻页。
+    now_ts = 6000.5
+    t.ok(inp.handleKeyBoardEv(inp, { fd = kfd, code = 118, value = 1 }) == nil,
+        "A17b: a duplicate press right after binding is swallowed")
+    t.eq(next_turns, before_next, "A17b: binding a press does not turn a page")
+    now_ts = 6002
+    inp.handleKeyBoardEv(inp, { fd = kfd, code = 118, value = 1 })
+    t.eq(next_turns, before_next + 1, "A17b: after the grace window the key pages again")
+
     -- 未知码不吞
     now_ts = 7000
     t.ok(inp.handleKeyBoardEv(inp, { fd = kfd, code = 200, value = 1 }) ~= nil,
@@ -483,7 +492,7 @@ return function(t)
     }
     Pager._reset()
 
-    local want = function(code) return code == 87 end
+    local want = function(code) return code == 87 or code == 79 or code == 26 end
     local ok, err = PagerInput.install_android_grab(want, function(code, value)
         dispatched[#dispatched + 1] = { code = code, value = value }
     end)
@@ -511,6 +520,19 @@ return function(t)
     android.lib.AInputQueue_finishEvent("q", { type = 2, action = 0, code = 87 }, 0)
     t.eq(handled_seen[4], 0, "A19: motion events are untouched")
 
+    -- KOReader 的 Android 桥丢给系统的**不止**媒体键：HEADSETHOOK(79)、
+    -- VOLUME_MUTE(164) 之类同样到不了 Lua，遥控器的「左右」常常就是它们。
+    -- 只认 MEDIA_CODES 会让这类键永远绑不上。
+    android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 79 }, 0)
+    t.eq(handled_seen[#handled_seen], 1, "A19: a dropped non-media key can be captured")
+    android.lib.AInputQueue_finishEvent("q", { type = 1, action = 1, code = 79 }, 0)
+    t.eq(handled_seen[#handled_seen], 1, "A19: its release is taken too")
+    t.eq(PagerInput.android_grab_last(), 79, "A19: the last grabbed code is reported")
+
+    -- 电源键是唯一永不接管的：系统本来就不给第三方应用。
+    android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 26 }, 0)
+    t.eq(handled_seen[#handled_seen], 0, "A19: POWER is never taken from the system")
+
     t.ok(PagerInput.uninstall_android_grab(), "A19: uninstall")
     t.ok(android.lib == fake_lib, "A19: uninstall restores android.lib")
 
@@ -518,6 +540,143 @@ return function(t)
     Pager.reset_bindings()
     Pager.start()
     t.ok(PagerInput.android_grab_installed(), "A19: Pager.start installs the grab on Android")
+    Pager._reset()
+
+    -- 从月读桌面直接开书时不存在 ReaderUI，插件 init（Pager.start）可能没跑过；
+    -- 阅读页自己必须把 grab 补上，否则媒体键/耳机键永远到不了 feed()。
+    t.ok(not PagerInput.android_grab_installed(), "A19: reset leaves the grab off")
+    Pager.watch_page()
+    t.ok(PagerInput.android_grab_installed(),
+        "A19: watch_page installs the Android grab even when start never ran")
+    Pager._reset()
+
+    ------------------------------------------------------------------------
+    -- A19b: 没绑过、但 KOReader 自己映射成翻页键的 Android 键（媒体键 87/88），
+    -- 阅读页在最上层时直接抓过来翻页 —— 「进 Kamare 就能用」的那条路。
+    ------------------------------------------------------------------------
+    inp = setup(t)
+    local auto_handled = {}
+    local auto_lib = {
+        AInputEvent_getType = function(ev) return ev.type end,
+        AKeyEvent_getAction = function(ev) return ev.action end,
+        AKeyEvent_getKeyCode = function(ev) return ev.code end,
+        AInputQueue_finishEvent = function(_, _, handled)
+            auto_handled[#auto_handled + 1] = handled
+            return 0
+        end,
+    }
+    local auto_android = { lib = auto_lib }
+    local auto_pending = {}
+    local auto_next, auto_prev = 0, 0
+    PagerInput.set_deps{
+        device = { input = inp, isAndroid = function() return true end },
+        input = inp,
+        android = auto_android,
+        schedule = function(_, fn) auto_pending[#auto_pending + 1] = fn return true end,
+    }
+    Pager.set_deps{
+        viewer = function()
+            return {
+                _images_list_cur = 1,
+                onShowNextImage = function(self)
+                    auto_next = auto_next + 1
+                    self._images_list_cur = self._images_list_cur + 1
+                end,
+                onShowPrevImage = function(self)
+                    auto_prev = auto_prev + 1
+                    self._images_list_cur = self._images_list_cur - 1
+                end,
+            }
+        end,
+    }
+    Pager._reset()
+    Pager.reset_bindings()
+    PagerInput.merge_event_map()
+    Pager.start()
+
+    auto_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 88 }, 0)
+    t.eq(auto_handled[1], 1, "A19b: an unbound key KOReader maps to paging is taken")
+    auto_pending[#auto_pending]()
+    t.eq(auto_prev, 1, "A19b: it turns the page with no binding")
+
+    -- 音量键不在这条自动路径上：用户开了「忽略音量键」也不该被我们悄悄翻页。
+    auto_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 164 }, 0)
+    t.eq(auto_handled[2], 0, "A19b: volume keys stay with the system unless bound")
+    -- 播放/暂停同理：它也是音乐控制，只有显式绑过才拿。
+    auto_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 85 }, 0)
+    t.eq(auto_handled[3], 0, "A19b: play/pause stays a media key unless bound")
+    Pager._reset()
+
+    ------------------------------------------------------------------------
+    -- A19c: Android 诊断嗅探 —— 30 秒内把「丢给系统」的键捞回来记码，
+    -- 只给诊断页看，不翻页；窗口外照旧放行。
+    ------------------------------------------------------------------------
+    inp = setup(t)
+    local sniff_handled = {}
+    local sniff_lib = {
+        AInputEvent_getType = function(ev) return ev.type end,
+        AKeyEvent_getAction = function(ev) return ev.action end,
+        AKeyEvent_getKeyCode = function(ev) return ev.code end,
+        AInputQueue_finishEvent = function(_, _, handled)
+            sniff_handled[#sniff_handled + 1] = handled
+            return 0
+        end,
+    }
+    local sniff_android = { lib = sniff_lib }
+    local sniff_pending = {}
+    local sniff_clock = 9000
+    local sniff_turns = 0
+    PagerInput.set_deps{
+        device = { input = inp, isAndroid = function() return true end },
+        input = inp,
+        android = sniff_android,
+        now = function() return sniff_clock end,
+        schedule = function(_, fn) sniff_pending[#sniff_pending + 1] = fn return true end,
+    }
+    Pager.set_deps{
+        now = function() return sniff_clock end,
+        viewer = function()
+            return {
+                _images_list_cur = 1,
+                onShowNextImage = function(self)
+                    sniff_turns = sniff_turns + 1
+                    self._images_list_cur = self._images_list_cur + 1
+                end,
+                onShowPrevImage = function(self)
+                    sniff_turns = sniff_turns + 1
+                    self._images_list_cur = self._images_list_cur - 1
+                end,
+            }
+        end,
+    }
+    Pager._reset()
+    Pager.reset_bindings()
+    Pager.start()
+    PagerInput.key_log = {}
+
+    t.ok(Pager.sniff_for(30), "A19c: Android sniff starts")
+    -- 79 = HEADSETHOOK：KOReader 的桥直接 return 0，平时永远到不了 Lua。
+    sniff_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 79 }, 0)
+    t.eq(sniff_handled[#sniff_handled], 1, "A19c: a dropped key is captured during sniffing")
+    sniff_pending[#sniff_pending]()
+    t.eq(PagerInput.last_key and PagerInput.last_key.code, 79,
+        "A19c: the captured code is recorded for diagnostics")
+    t.eq(sniff_turns, 0, "A19c: sniffing never turns the page")
+    t.ok(Pager.diagnose():find("Android sniff", 1, true) ~= nil,
+        "A19c: diagnostics shows the sniff window")
+
+    -- 窗口外：这颗键照旧还给系统（不抢用户的耳机/媒体键）。
+    sniff_clock = sniff_clock + 31
+    sniff_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 79 }, 0)
+    t.eq(sniff_handled[#sniff_handled], 0, "A19c: after the window the key goes back to the system")
+    t.ok(Pager.diagnose():find("Android sniff", 1, true) == nil,
+        "A19c: an expired window is cleared from diagnostics")
+
+    -- 手动停止也要立刻生效。
+    Pager.sniff_for(30)
+    Pager.sniff_stop()
+    sniff_android.lib.AInputQueue_finishEvent("q", { type = 1, action = 0, code = 79 }, 0)
+    t.eq(sniff_handled[#sniff_handled], 0, "A19c: sniff_stop ends the window immediately")
     Pager._reset()
 
     ------------------------------------------------------------------------
@@ -579,4 +738,44 @@ return function(t)
     PagerInput.uninstall_backend_hook()
     t.ok(not PagerInput.backend_hooked(), "A20: backend hook removed")
     Pager._reset()
+
+    ------------------------------------------------------------------------
+    -- A21: 手势翻页 —— 遥控器「单击」是 swipe，不是 keycode
+    ------------------------------------------------------------------------
+    t.eq(Pager.swipe_action("west"), "next", "A21: swipe left turns forward")
+    t.eq(Pager.swipe_action("east"), "prev", "A21: swipe right turns back")
+    t.eq(Pager.swipe_action("north"), "prev", "A21: swipe up turns back (Up key)")
+    t.eq(Pager.swipe_action("south"), "next", "A21: swipe down turns forward (Down key)")
+    t.is_nil(Pager.swipe_action("nonsense"), "A21: diagonal/invalid swipes are ignored")
+
+    -- 遥控器的「右」键让指针向右滑，和触屏相反：翻转开关只动左右。
+    t.eq(Pager.swipe_action("west", true), "prev", "A21: flipped, swipe left turns back")
+    t.eq(Pager.swipe_action("east", true), "next", "A21: flipped, swipe right turns forward")
+    t.eq(Pager.swipe_action("north", true), "prev", "A21: flipping leaves up/down alone")
+    t.eq(Pager.swipe_action("south", true), "next", "A21: flipping leaves up/down alone (2)")
+
+    Pager._reset()
+    Pager.note_swipe("west", "next")
+    Pager.note_swipe("east", "prev")
+    local gestures = Pager.swipe_state()
+    t.eq(gestures.count, 2, "A21: swipe count is kept for diagnostics")
+    t.eq(gestures.last, "east", "A21: last swipe direction is kept")
+    t.eq(gestures.last_action, "prev", "A21: last swipe action is kept")
+    t.ok(Pager.diagnose():find("Swipe gestures", 1, true) ~= nil,
+        "A21: diagnostics shows the swipe line")
+    Pager._reset()
+    t.eq(Pager.swipe_state().count, 0, "A21: reset clears the swipe counters")
+
+    -- viewer 必须真的注册 swipe、并走门面的映射（viewer 拉不起 UI 栈，查源码）。
+    local viewer_handle = io.open((t.spec_dir or "spec") .. "/../src/kamareimageviewer.lua", "rb")
+    local viewer_src = viewer_handle and viewer_handle:read("*a") or ""
+    if viewer_handle then viewer_handle:close() end
+    t.ok(viewer_src:find('id = "kamare_swipe"', 1, true) ~= nil,
+        "A21: the viewer registers a swipe zone")
+    t.ok(viewer_src:find('ges = "swipe"', 1, true) ~= nil,
+        "A21: the zone is a swipe gesture")
+    t.ok(viewer_src:find("Pager.swipe_action(dir, Pager.swipe_flipped())", 1, true) ~= nil,
+        "A21: onSwipe routes through the facade")
+    t.ok(viewer_src:find("Pager.note_swipe(dir, action)", 1, true) ~= nil,
+        "A21: onSwipe records the direction for diagnostics")
 end
