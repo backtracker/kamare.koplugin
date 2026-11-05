@@ -720,7 +720,7 @@ function KamareImageViewer:loadSettings()
     self.magnifier_zoom = Math.clamp(tonumber(self.configurable.magnifier_zoom) or 2.0, 1.25, 2.5)
     local size_percent = tonumber(self.configurable.magnifier_scope) or 25
     if size_percent <= 1 then size_percent = size_percent * 100 end
-    self.magnifier_scope = Math.clamp(size_percent, 10, 45) / 100
+    self.magnifier_scope = Math.clamp(size_percent, 10, 70) / 100
     self.zoom_mode = self.configurable.zoom_mode_type or 0
     self.page_gap_height = self.configurable.page_gap_height or 8
     self.scroll_distance = self.configurable.scroll_distance or 25
@@ -1966,7 +1966,7 @@ end
 function KamareImageViewer:onMagnifierScopeUpdate(value)
     local percent = tonumber(value)
     if not percent then return false end
-    percent = Math.clamp(percent, 10, 45)
+    percent = Math.clamp(percent, 10, 70)
     percent = math.floor(percent + 0.5)
     if percent / 100 == self.magnifier_scope then return true end
 

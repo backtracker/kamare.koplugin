@@ -17,7 +17,7 @@ local Magnifier = {}
 -- screen's short side. The reader config menu overrides this per book/globally.
 Magnifier.SCOPE_RATIO = 0.25
 Magnifier.MIN_SCOPE_RATIO = 0.10
-Magnifier.MAX_SCOPE_RATIO = 0.45
+Magnifier.MAX_SCOPE_RATIO = 0.70
 -- How much bigger than the page's current display zoom the loupe is.
 -- The reader config menu overrides this per book/globally.
 Magnifier.MAGNIFY_FACTOR = 2.0

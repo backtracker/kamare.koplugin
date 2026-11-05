@@ -158,12 +158,12 @@ local KamareOptions = {
                 name = "magnifier_scope",
                 name_text = _("Magnifier Scope"),
                 buttonprogress = true,
-                values = {10, 15, 20, 25, 30, 35, 40},
-                default_pos = 4,
+                values = {15, 20, 25, 30, 35, 40, 50, 60},
+                default_pos = 3,
                 default_value = 25,
                 event = "MagnifierScopeUpdate",
-                args = {10, 15, 20, 25, 30, 35, 40},
-                labels = {"10%", "15%", "20%", "25%", "30%", "35%", "40%"},
+                args = {15, 20, 25, 30, 35, 40, 50, 60},
+                labels = {"15%", "20%", "25%", "30%", "35%", "40%", "50%", "60%"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -171,7 +171,7 @@ local KamareOptions = {
                 more_options = true,
                 more_options_param = {
                     value_step = 5, value_hold_step = 10,
-                    value_min = 10, value_max = 45,
+                    value_min = 10, value_max = 70,
                     precision = "%.0f",
                 },
                 help_text = _([[How much of the page around your finger is magnified, as a percentage of the screen's short side. The magnified window is this area times the zoom level.]]),

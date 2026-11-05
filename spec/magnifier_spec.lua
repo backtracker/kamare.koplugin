@@ -43,8 +43,11 @@ return function(t)
         "M1b: wider scope grows the window")
     t.eq(l.h, l.w, "M1b: window stays square")
     l = Magnifier.layout(base{ scope_ratio = 2.0 })
-    t.eq(l.w, math.floor(600 * Magnifier.MAX_SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR),
-        "M1b: oversized value clamps to the max")
+    t.eq(l.w, math.min(600,
+            math.floor(600 * Magnifier.MAX_SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR)),
+        "M1b: oversized value clamps to the max and the canvas")
+    l = Magnifier.layout(base{ scope_ratio = 0.60 })
+    t.eq(l.w, 600, "M1b: a big scope is capped by the canvas")
     l = Magnifier.layout(base{ scope_ratio = 0.01 })
     t.eq(l.w, math.floor(600 * Magnifier.MIN_SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR),
         "M1b: undersized value clamps to the min")

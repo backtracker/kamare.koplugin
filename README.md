@@ -24,8 +24,8 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
   next to the on/off switch, both saved globally and per series like the other
   reading options:
   - `Magnifier Scope` — how much of the page around your finger is captured,
-    as a share of the screen's short side (10% / 15% / 20% / 25% / 30% / 35% /
-    40%, default 25%; `⋮` allows 10–45%).
+    as a share of the screen's short side (15% / 20% / 25% / 30% / 35% / 40% /
+    50% / 60%, default 25%; `⋮` allows 10–70%).
   - `Magnifier Zoom` — how much that captured area is enlarged
     (1.25x / 1.5x / 1.75x / 2x / 2.25x / 2.5x, default 2x; `⋮` allows
     1.25–2.5). Higher zoom also makes the window bigger, so the same area is
