@@ -34,18 +34,39 @@ return function(t)
     t.ok(l ~= nil, "M1: layout exists")
     t.eq(l.w, math.floor(600 * 0.55), "M1: loupe is 55% of the short side")
     t.eq(l.h, l.w, "M1: loupe is square")
+
+    -- The reader-config size scales the window; 55% stays the default.
+    l = Magnifier.layout(base{ size_ratio = 0.40 })
+    t.eq(l.w, math.floor(600 * 0.40), "M1b: 40% window")
+    t.eq(l.h, l.w, "M1b: window stays square")
+    l = Magnifier.layout(base{ size_ratio = 2.0 })
+    t.eq(l.w, math.floor(600 * Magnifier.MAX_SIZE_RATIO),
+        "M1b: oversized value clamps to the max")
+    l = Magnifier.layout(base{ size_ratio = 0.01 })
+    t.eq(l.w, math.floor(600 * Magnifier.MIN_SIZE_RATIO),
+        "M1b: undersized value clamps to the min")
     t.eq(l.zoom, 1.0, "M1: 0.5 zoom magnifies to the 1.0 floor")
     t.near(l.src.x + l.src.w / 2, 400, 0.001, "M1: finger maps to page x")
     t.near(l.src.y + l.src.h / 2, 600, 0.001, "M1: finger maps to page y")
 
-    -- Zooming the page in also raises the loupe zoom, capped at 3x.
+    -- Zooming the page in also raises the loupe zoom, capped at a safety max.
     l = Magnifier.layout(base{ zoom = 0.8 })
     t.near(l.zoom, 1.6, 0.001, "M2: loupe zoom follows the page zoom")
     -- 800x1200 at 0.8 overflows the 600x800 canvas: the visible rect starts
     -- at x=25, so finger x=300 is page x=400.
     t.near(l.src.x + l.src.w / 2, 400, 0.001, "M2: x still maps to the finger")
     l = Magnifier.layout(base{ zoom = 4.0 })
-    t.eq(l.zoom, 3.0, "M2: loupe zoom is capped")
+    t.eq(l.zoom, Magnifier.MAX_ZOOM, "M2: loupe zoom is capped")
+
+    -- The reader-config factor scales the loupe zoom relative to the page.
+    l = Magnifier.layout(base{ magnify_factor = 1.5 })
+    t.near(l.zoom, 0.75, 0.001, "M2b: 1.5x level")
+    l = Magnifier.layout(base{ magnify_factor = 4.0, zoom = 0.5 })
+    t.near(l.zoom, 2.0, 0.001, "M2b: 4x level")
+    l = Magnifier.layout(base{ magnify_factor = 99 })
+    t.near(l.zoom, 2.0, 0.001, "M2b: out-of-range factor clamps to the max")
+    l = Magnifier.layout(base{ magnify_factor = 0 })
+    t.near(l.zoom, 0.5, 0.001, "M2b: out-of-range low factor clamps to 1x")
 
     -- Clamping: the source window never leaves the page.
     l = Magnifier.layout(base{ finger_x = 0, finger_y = 0, edge_gap = 0 })

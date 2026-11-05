@@ -46,6 +46,18 @@ return function(t)
         "G2: the option event has a handler")
     t.ok(viewer:find("long_press_magnifier = self.long_press_magnifier", 1, true) ~= nil,
         "G2: the switch is persisted through configurable")
+    t.ok(viewer:find("function KamareImageViewer:onMagnifierZoomUpdate", 1, true) ~= nil,
+        "G2: the zoom level has a handler")
+    t.ok(viewer:find("function KamareImageViewer:onMagnifierSizeUpdate", 1, true) ~= nil,
+        "G2: the window size has a handler")
+    t.ok(viewer:find("self.canvas.magnifier_zoom = factor", 1, true) ~= nil,
+        "G2: the zoom level reaches the canvas")
+    t.ok(viewer:find("self.canvas.magnifier_size = self.magnifier_size", 1, true) ~= nil,
+        "G2: the window size reaches the canvas")
+    t.ok(viewer:find("magnifier_zoom = self.magnifier_zoom", 1, true) ~= nil,
+        "G2: the zoom level is persisted through configurable")
+    t.ok(viewer:find("magnifier_size = self.magnifier_size", 1, true) ~= nil,
+        "G2: the window size is persisted through configurable")
 
     ------------------------------------------------------------------------
     -- Canvas rendering
@@ -56,6 +68,12 @@ return function(t)
         "G3: canvas paints the magnifier")
     t.ok(canvas:find("function VirtualPageCanvas:_loupeLayout", 1, true) ~= nil,
         "G3: canvas maps the finger into page coordinates")
+    t.ok(canvas:find("magnify_factor = self.magnifier_zoom", 1, true) ~= nil,
+        "G3: the zoom level is passed to the geometry")
+    t.ok(canvas:find("size_ratio = self.magnifier_size", 1, true) ~= nil,
+        "G3: the window size is passed to the geometry")
+    t.ok(canvas:find("function VirtualPageCanvas:refreshLoupe", 1, true) ~= nil,
+        "G3: an open loupe repaints after a zoom change")
 
     ------------------------------------------------------------------------
     -- Reader config menu
@@ -64,4 +82,12 @@ return function(t)
         "G4: the reader config menu exposes the switch")
     t.ok(options:find('event = "SetLongPressMagnifier"', 1, true) ~= nil,
         "G4: the switch event is wired")
+    t.ok(options:find('name = "magnifier_zoom"', 1, true) ~= nil,
+        "G4: the reader config menu exposes the zoom level")
+    t.ok(options:find('event = "MagnifierZoomUpdate"', 1, true) ~= nil,
+        "G4: the zoom event is wired")
+    t.ok(options:find('name = "magnifier_size"', 1, true) ~= nil,
+        "G4: the reader config menu exposes the window size")
+    t.ok(options:find('event = "MagnifierSizeUpdate"', 1, true) ~= nil,
+        "G4: the window size event is wired")
 end

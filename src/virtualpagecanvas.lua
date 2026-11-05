@@ -63,6 +63,11 @@ local VirtualPageCanvas = Widget:extend{
     -- the last dirty rect, so moving it repaints both the old and new spot.
     _loupe = nil,
     _loupe_region = nil,
+    -- Magnification relative to the page's current display zoom; owned by the
+    -- viewer's reader-config option.
+    magnifier_zoom = Magnifier.MAGNIFY_FACTOR,
+    -- Loupe window size as a fraction of the screen's short side.
+    magnifier_size = Magnifier.SIZE_RATIO,
 
     -- Wide-page fit-height mode (Mihon's landscape zoom): in single-page
     -- view, a wide page zooms to fill height and pans horizontally.
@@ -791,6 +796,8 @@ function VirtualPageCanvas:_loupeLayout(finger_x, finger_y)
         center_y = self.center_y_ratio,
         finger_x = finger_x,
         finger_y = finger_y,
+        size_ratio = self.magnifier_size,
+        magnify_factor = self.magnifier_zoom,
         edge_gap = Screen:scaleBySize(60),
     }
     if not layout then return nil end
@@ -856,6 +863,18 @@ function VirtualPageCanvas:moveLoupe(finger_x, finger_y)
     local region = self:_loupeRegionFor(finger_x, finger_y)
     self._loupe_region = region
     if not region then return nil end
+    if old_region then return old_region:combine(region) end
+    return region
+end
+
+--- Repaint the loupe after a settings change (e.g. magnifier zoom); returns
+--- the dirty rect covering the old and new window.
+function VirtualPageCanvas:refreshLoupe()
+    if not self._loupe then return nil end
+    local old_region = self._loupe_region
+    local region = self:_loupeRegionFor(self._loupe.x, self._loupe.y)
+    self._loupe_region = region
+    if not region then return old_region end
     if old_region then return old_region:combine(region) end
     return region
 end

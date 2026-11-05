@@ -142,9 +142,9 @@ local KamareOptions = {
                 help_text = _([[Choose the background color for the image viewer.]]),
             },
             {
-                -- Keep this last in the first panel: the config dialog is
-                -- bottom-anchored, so on short screens the top rows can be
-                -- clipped while the last one is always visible.
+                -- Keep the magnifier rows last in the first panel: the config
+                -- dialog is bottom-anchored, so on short screens the top rows
+                -- can be clipped while the last ones are always visible.
                 name = "long_press_magnifier",
                 name_text = _("Long-press magnifier"),
                 toggle = {_("off"), _("on")},
@@ -153,6 +153,50 @@ local KamareOptions = {
                 event = "SetLongPressMagnifier",
                 args = {0, 1},
                 help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
+            },
+            {
+                name = "magnifier_size",
+                name_text = _("Magnifier Size"),
+                buttonprogress = true,
+                values = {40, 55, 70, 85},
+                default_pos = 2,
+                default_value = 55,
+                event = "MagnifierSizeUpdate",
+                args = {40, 55, 70, 85},
+                labels = {"40%", "55%", "70%", "85%"},
+                name_text_hold_callback = optionsutil.showValues,
+                enabled_func = function(configurable)
+                    return (tonumber(configurable.long_press_magnifier) or 1) == 1
+                end,
+                more_options = true,
+                more_options_param = {
+                    value_step = 5, value_hold_step = 10,
+                    value_min = 30, value_max = 90,
+                    precision = "%.0f",
+                },
+                help_text = _([[Size of the magnified window, as a percentage of the screen's short side. A larger window shows more of the page at the chosen zoom level.]]),
+            },
+            {
+                name = "magnifier_zoom",
+                name_text = _("Magnifier Zoom"),
+                buttonprogress = true,
+                values = {1.5, 2.0, 2.5, 3.0, 4.0},
+                default_pos = 2,
+                default_value = 2.0,
+                event = "MagnifierZoomUpdate",
+                args = {1.5, 2.0, 2.5, 3.0, 4.0},
+                labels = {"1.5x", "2x", "2.5x", "3x", "4x"},
+                name_text_hold_callback = optionsutil.showValues,
+                enabled_func = function(configurable)
+                    return (tonumber(configurable.long_press_magnifier) or 1) == 1
+                end,
+                more_options = true,
+                more_options_param = {
+                    value_step = 0.5, value_hold_step = 1,
+                    value_min = 1.0, value_max = 4.0,
+                    precision = "%.1f",
+                },
+                help_text = _([[How much the magnifier enlarges the page under your finger, relative to the page's current size. 2x is the default; higher values show a smaller area with bigger text.]]),
             }
         }
     },

@@ -121,6 +121,10 @@ local KamareImageViewer = InputContainer:extend{
 
     -- Long-press magnifier: hold on a page to show a local magnified window.
     long_press_magnifier = 1, -- 0 = off, 1 = on
+    -- Loupe magnification relative to the page's current display zoom.
+    magnifier_zoom = 2.0,
+    -- Loupe window size as a fraction of the screen's short side.
+    magnifier_size = 0.55,
 
     scroll_distance = 25, -- percentage (25, 50, 75, 100)
     h_margin = 0, -- left/right viewport margin
@@ -474,6 +478,8 @@ function KamareImageViewer:_initCanvas()
         page_gap_height = self.page_gap_height,
         render_quality = self.render_quality or -1,
         landscape_zoom = self:_landscapeZoomEnabled(),
+        magnifier_zoom = self.magnifier_zoom,
+        magnifier_size = self.magnifier_size,
     }
 
     self.canvas_container = CenterContainer:new{
@@ -678,6 +684,8 @@ function KamareImageViewer:loadSettings()
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.magnifier_zoom = self.magnifier_zoom
+    self.configurable.magnifier_size = math.floor(self.magnifier_size * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -709,6 +717,10 @@ function KamareImageViewer:loadSettings()
         or self.configurable.crop_borders == 1
         or self.configurable.crop_borders == "1"
     self.long_press_magnifier = tonumber(self.configurable.long_press_magnifier) or 1
+    self.magnifier_zoom = Math.clamp(tonumber(self.configurable.magnifier_zoom) or 2.0, 1.0, 4.0)
+    local size_percent = tonumber(self.configurable.magnifier_size) or 55
+    if size_percent <= 1 then size_percent = size_percent * 100 end
+    self.magnifier_size = Math.clamp(size_percent, 30, 90) / 100
     self.zoom_mode = self.configurable.zoom_mode_type or 0
     self.page_gap_height = self.configurable.page_gap_height or 8
     self.scroll_distance = self.configurable.scroll_distance or 25
@@ -741,6 +753,8 @@ function KamareImageViewer:syncAndSaveSettings()
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.magnifier_zoom = self.magnifier_zoom
+    self.configurable.magnifier_size = math.floor(self.magnifier_size * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -1336,6 +1350,8 @@ function KamareImageViewer:onShowConfigMenu()
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.magnifier_zoom = self.magnifier_zoom
+    self.configurable.magnifier_size = math.floor(self.magnifier_size * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -1924,6 +1940,41 @@ function KamareImageViewer:onSetLongPressMagnifier(value)
     self.configurable.long_press_magnifier = self.long_press_magnifier
     if not enabled and self.canvas then
         local region = self.canvas:endLoupe()
+        if region then UIManager:setDirty(self, "partial", region) end
+    end
+    self:syncAndSaveSettings()
+    return true
+end
+
+function KamareImageViewer:onMagnifierZoomUpdate(value)
+    local factor = tonumber(value)
+    if not factor then return false end
+    factor = Math.clamp(factor, 1.0, 4.0)
+    if factor == self.magnifier_zoom then return true end
+
+    self.magnifier_zoom = factor
+    self.configurable.magnifier_zoom = factor
+    if self.canvas then
+        self.canvas.magnifier_zoom = factor
+        local region = self.canvas:refreshLoupe()
+        if region then UIManager:setDirty(self, "partial", region) end
+    end
+    self:syncAndSaveSettings()
+    return true
+end
+
+function KamareImageViewer:onMagnifierSizeUpdate(value)
+    local percent = tonumber(value)
+    if not percent then return false end
+    percent = Math.clamp(percent, 30, 90)
+    percent = math.floor(percent + 0.5)
+    if percent / 100 == self.magnifier_size then return true end
+
+    self.magnifier_size = percent / 100
+    self.configurable.magnifier_size = percent
+    if self.canvas then
+        self.canvas.magnifier_size = self.magnifier_size
+        local region = self.canvas:refreshLoupe()
         if region then UIManager:setDirty(self, "partial", region) end
     end
     self:syncAndSaveSettings()

@@ -18,6 +18,18 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
 
+## What's new in 0.10.8
+
+- **Magnifier size and zoom.** The reader config menu now has two controls
+  next to the on/off switch, both saved globally and per series like the other
+  reading options:
+  - `Magnifier Size` — window size as a share of the screen's short side
+    (40% / 55% / 70% / 85%, default 55%; `⋮` allows 30–90%).
+  - `Magnifier Zoom` — how much it enlarges, relative to the page's current
+    display size (1.5x / 2x / 2.5x / 3x / 4x, default 2x; `⋮` allows 1.0–4.0).
+  Hold a row name to see the current value; changing either one while the
+  loupe is open repaints it immediately.
+
 ## What's new in 0.10.7
 
 - **Long-press magnifier.** Hold anywhere on a page to bring up a magnified

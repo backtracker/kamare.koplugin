@@ -6,7 +6,7 @@ local version = "@VERSION@"
 local placeholder = "@VERSION" .. "@"
 
 if version == placeholder or version == "" then
-    version = "0.10.7-dev"
+    version = "0.10.8-dev"
 end
 
 return version

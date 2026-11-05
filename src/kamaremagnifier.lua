@@ -14,16 +14,24 @@ local Math = require("optmath")
 local Magnifier = {}
 
 -- Fraction of the screen's short side used by the loupe.
+-- The reader config menu overrides this per book/globally.
 Magnifier.SIZE_RATIO = 0.55
+Magnifier.MIN_SIZE_RATIO = 0.30
+Magnifier.MAX_SIZE_RATIO = 0.90
 -- How much bigger than the page's current display zoom the loupe is.
+-- The reader config menu overrides this per book/globally.
 Magnifier.MAGNIFY_FACTOR = 2.0
-Magnifier.MIN_ZOOM = 1.0
-Magnifier.MAX_ZOOM = 3.0
+Magnifier.MIN_FACTOR = 1.0
+Magnifier.MAX_FACTOR = 4.0
+Magnifier.MIN_ZOOM = 0.1
+-- Absolute render-zoom ceiling. The option is a factor relative to the page
+-- zoom, so this must leave room for the largest factor on a fit-height page.
+Magnifier.MAX_ZOOM = 6.0
 
 --- @param o table
 ---   canvas_w, canvas_h, h_margin, top_margin, bottom_margin,
 ---   native_w, native_h, zoom, zoom_mode, center_x, center_y,
----   finger_x, finger_y, edge_gap
+---   finger_x, finger_y, edge_gap, size_ratio, magnify_factor
 --- @return table|nil { x, y, w, h, zoom, src = { x, y, w, h } }
 function Magnifier.layout(o)
     o = o or {}
@@ -70,9 +78,14 @@ function Magnifier.layout(o)
     local page_y = Math.clamp(rect_y + (py - dest_y) / zoom, rect_y, rect_y + rect_h)
 
     local short = math.min(canvas_w, canvas_h)
-    local loupe_w = math.floor(short * Magnifier.SIZE_RATIO)
+    local size_ratio = tonumber(o.size_ratio) or Magnifier.SIZE_RATIO
+    size_ratio = Math.clamp(size_ratio,
+        Magnifier.MIN_SIZE_RATIO, Magnifier.MAX_SIZE_RATIO)
+    local loupe_w = math.floor(short * size_ratio)
     local loupe_h = loupe_w
-    local loupe_zoom = Math.clamp(zoom * Magnifier.MAGNIFY_FACTOR,
+    local factor = tonumber(o.magnify_factor) or Magnifier.MAGNIFY_FACTOR
+    factor = Math.clamp(factor, Magnifier.MIN_FACTOR, Magnifier.MAX_FACTOR)
+    local loupe_zoom = Math.clamp(zoom * factor,
         Magnifier.MIN_ZOOM, Magnifier.MAX_ZOOM)
     local src_w = math.min(loupe_w / loupe_zoom, rect_w)
     local src_h = math.min(loupe_h / loupe_zoom, rect_h)

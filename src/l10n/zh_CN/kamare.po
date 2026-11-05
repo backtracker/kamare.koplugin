@@ -1261,3 +1261,15 @@ msgstr "长按放大"
 
 msgid "Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only."
 msgstr "在页面上按住：手指下方出现局部放大窗口，松手恢复。屏幕顶部 8% 仍用于打开翻页器菜单；仅单页模式可用。"
+
+msgid "Magnifier Zoom"
+msgstr "放大倍数"
+
+msgid "How much the magnifier enlarges the page under your finger, relative to the page's current size. 2x is the default; higher values show a smaller area with bigger text."
+msgstr "手指下方放大镜相对当前页面显示大小的放大倍数。默认 2 倍；倍数越高，显示的范围越小、字越大。"
+
+msgid "Magnifier Size"
+msgstr "放大范围"
+
+msgid "Size of the magnified window, as a percentage of the screen's short side. A larger window shows more of the page at the chosen zoom level."
+msgstr "放大窗口占屏幕短边的比例。窗口越大，同样倍数下能看到更多页面内容。"
