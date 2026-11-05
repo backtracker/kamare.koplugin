@@ -24,11 +24,11 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
   next to the on/off switch, both saved globally and per series like the other
   reading options:
   - `Magnifier Size` — window size as a share of the screen's short side
-    (55% / 60% / 65% / 70% / 80% / 90% / 100%, default 55%; `⋮` allows
-    45–100%).
+    (60% / 65% / 70% / 75% / 80% / 85% / 90% / 100%, default 60%; `⋮` allows
+    45–100%). 100% is the full screen width in portrait.
   - `Magnifier Zoom` — how much it enlarges, relative to the page's current
-    display size (1x / 1.25x / 1.5x / 1.75x / 2x / 2.5x / 3x, default 2x;
-    `⋮` allows 1.0–3.0).
+    display size (1.25x / 1.5x / 1.75x / 2x / 2.25x / 2.5x / 2.75x / 3x,
+    default 2x; `⋮` allows 1.25–3.0).
   Hold a row name to see the current value; changing either one while the
   loupe is open repaints it immediately.
 

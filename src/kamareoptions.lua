@@ -158,12 +158,12 @@ local KamareOptions = {
                 name = "magnifier_size",
                 name_text = _("Magnifier Size"),
                 buttonprogress = true,
-                values = {55, 60, 65, 70, 80, 90, 100},
+                values = {60, 65, 70, 75, 80, 85, 90, 100},
                 default_pos = 1,
-                default_value = 55,
+                default_value = 60,
                 event = "MagnifierSizeUpdate",
-                args = {55, 60, 65, 70, 80, 90, 100},
-                labels = {"55%", "60%", "65%", "70%", "80%", "90%", "100%"},
+                args = {60, 65, 70, 75, 80, 85, 90, 100},
+                labels = {"60%", "65%", "70%", "75%", "80%", "85%", "90%", "100%"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -180,12 +180,12 @@ local KamareOptions = {
                 name = "magnifier_zoom",
                 name_text = _("Magnifier Zoom"),
                 buttonprogress = true,
-                values = {1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0},
-                default_pos = 5,
+                values = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0},
+                default_pos = 4,
                 default_value = 2.0,
                 event = "MagnifierZoomUpdate",
-                args = {1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0},
-                labels = {"1x", "1.25x", "1.5x", "1.75x", "2x", "2.5x", "3x"},
+                args = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0},
+                labels = {"1.25x", "1.5x", "1.75x", "2x", "2.25x", "2.5x", "2.75x", "3x"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -193,7 +193,7 @@ local KamareOptions = {
                 more_options = true,
                 more_options_param = {
                     value_step = 0.25, value_hold_step = 1,
-                    value_min = 1.0, value_max = 3.0,
+                    value_min = 1.25, value_max = 3.0,
                     precision = "%.2f",
                 },
                 help_text = _([[How much the magnifier enlarges the page under your finger, relative to the page's current size. 2x is the default; higher values show a smaller area with bigger text.]]),

@@ -32,10 +32,11 @@ return function(t)
     -- dest = (100,100), so finger (300,400) is page (400,600).
     local l = Magnifier.layout(base())
     t.ok(l ~= nil, "M1: layout exists")
-    t.eq(l.w, math.floor(600 * 0.55), "M1: loupe is 55% of the short side")
+    t.eq(l.w, math.floor(600 * Magnifier.SIZE_RATIO),
+        "M1: loupe defaults to 60% of the short side")
     t.eq(l.h, l.w, "M1: loupe is square")
 
-    -- The reader-config size scales the window; 55% stays the default.
+    -- The reader-config size scales the window.
     l = Magnifier.layout(base{ size_ratio = 0.70 })
     t.eq(l.w, math.floor(600 * 0.70), "M1b: 70% window")
     t.eq(l.h, l.w, "M1b: window stays square")
@@ -66,7 +67,7 @@ return function(t)
     l = Magnifier.layout(base{ magnify_factor = 99 })
     t.near(l.zoom, 1.5, 0.001, "M2b: out-of-range factor clamps to the max")
     l = Magnifier.layout(base{ magnify_factor = 0 })
-    t.near(l.zoom, 0.5, 0.001, "M2b: out-of-range low factor clamps to 1x")
+    t.near(l.zoom, 0.625, 0.001, "M2b: out-of-range low factor clamps to 1.25x")
 
     -- Clamping: the source window never leaves the page.
     l = Magnifier.layout(base{ finger_x = 0, finger_y = 0, edge_gap = 0 })
