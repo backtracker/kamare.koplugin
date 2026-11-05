@@ -18,6 +18,15 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
 
+## What's new in 0.10.9
+
+- **Wide-page split is flush again.** Two-page scans whose artwork reaches all
+  four outer edges used to be split at the geometric midpoint, leaving half of
+  the white gutter as a strip on each half (very visible on 北斗神拳 and
+  similar scanned tankōbon). The gutter is now found from the page's dominant
+  paper colour even when no outer margin can be cropped, and the split follows
+  it; asymmetric spreads such as covers are covered too.
+
 ## What's new in 0.10.8
 
 - **Magnifier size and zoom.** The reader config menu now has two controls

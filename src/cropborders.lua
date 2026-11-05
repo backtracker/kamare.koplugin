@@ -82,6 +82,29 @@ local function classifyCol(gray, width, x, y0, y1)
     return nil
 end
 
+-- The page-background colour, guessed from the whole image. Used when no
+-- outer edge is a clean, uniform margin: a two-page scan whose artwork runs
+-- to every outer edge still has a blank gutter down the middle, and that
+-- gutter must be found for the wide-page split. Paper is white in almost
+-- every scan; a black-background spread stays black as long as black wins.
+local function dominantBg(gray, width, height)
+    local white, black, n = 0, 0, 0
+    for y = 0, height - 1, 4 do
+        local row = y * width
+        for x = 0, width - 1, 4 do
+            local v = gray[row + x]
+            n = n + 1
+            if v >= WHITE_MIN then
+                white = white + 1
+            elseif v <= BLACK_MAX then
+                black = black + 1
+            end
+        end
+    end
+    if n == 0 then return nil end
+    return white >= black and "white" or "black"
+end
+
 -- A pixel counts as content when it differs from the margin colour. `strong`
 -- is the confident-ink variant: it drops light grey marks (watermarks, dust)
 -- that are still dark/light enough to count as the loose variant.
@@ -136,13 +159,22 @@ end
 -- Two-page scans are one wide image with a blank gutter between the pages.
 -- Splitting at the geometric midpoint lands inside that gutter, so both
 -- halves keep a white strip on their inner edge. Look for a full-height
--- blank band near the middle of the content and return its sample-space
--- bounds (x2 exclusive); nil when the page has no such gutter.
+-- blank band in the middle 60% of the content (covers and other asymmetric
+-- spreads put it off-centre) and return its sample-space bounds (x2
+-- exclusive); nil when the page has no such gutter.
 function CropBorders.findGutter(gray, width, height, left, top, right, bottom, bg)
     local span = right - left
-    if span < 24 or bottom - top < 8 or not bg then
+    if span < 24 or bottom - top < 8 then
         return nil
     end
+
+    -- A page whose artwork runs to all four outer edges has no uniform margin
+    -- for findBounds to report, but the gutter between the two scanned pages
+    -- is still there. Fall back to the page's dominant colour instead of
+    -- giving up (the old `not bg` shortcut left half a white gutter on each
+    -- split half on every full-bleed spread).
+    bg = bg or dominantBg(gray, width, height)
+    if not bg then return nil end
 
     -- Only the page background counts: a solid black panel is uniform too,
     -- but it is content, not the gap between two scanned pages.
@@ -151,8 +183,8 @@ function CropBorders.findGutter(gray, width, height, left, top, right, bottom, b
     end
 
     local centre = left + span / 2
-    local lo = left + math.floor(span * 0.30)
-    local hi = left + math.ceil(span * 0.70)
+    local lo = left + math.floor(span * 0.20)
+    local hi = left + math.ceil(span * 0.80)
 
     local best_len, best_x1, best_x2 = 0, nil, nil
     local run_x1
@@ -420,10 +452,6 @@ function CropBorders.detect(raw_data, native_w, native_h)
         return nil
     end
 
-    if left <= 0 and top <= 0 and right >= width and bottom >= height then
-        return nil
-    end
-
     -- A sampled pixel of slack each way keeps gaps between samples from
     -- cutting into content. It is only needed when the image was downscaled.
     local scaled = width < native_w or height < native_h
@@ -439,25 +467,28 @@ function CropBorders.detect(raw_data, native_w, native_h)
     if x2 - x < 2 or y2 - y < 2 then
         return nil
     end
-    if x == 0 and y == 0 and x2 == native_w and y2 == native_h then
-        return nil
-    end
-
-    local rect = { x = x, y = y, w = x2 - x, h = y2 - y }
 
     -- Record the blank gutter of a two-page scan so the viewer can split
     -- there instead of at the geometric midpoint. Round into the gutter
     -- (never into the page art) so no white sliver is left on either half.
+    -- This also runs when there is no outer border to crop: a full-bleed
+    -- spread has content on every edge but still needs the right split.
     local gx1, gx2 = CropBorders.findGutter(gray, width, height, left, top, right, bottom, margin)
+    local gutter
     if gx1 then
         local g1 = math.max(x, math.ceil(gx1 * sx))
         local g2 = math.min(x2, math.floor(gx2 * sx))
         if g2 - g1 >= 2 then
-            rect.gutter = { x1 = g1, x2 = g2 }
+            gutter = { x1 = g1, x2 = g2 }
         end
     end
 
-    return rect
+    local cropped = x > 0 or y > 0 or x2 < native_w or y2 < native_h
+    if not cropped and not gutter then
+        return nil
+    end
+
+    return { x = x, y = y, w = x2 - x, h = y2 - y, gutter = gutter }
 end
 
 return CropBorders
