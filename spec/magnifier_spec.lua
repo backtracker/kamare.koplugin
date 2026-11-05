@@ -36,8 +36,8 @@ return function(t)
     t.eq(l.h, l.w, "M1: loupe is square")
 
     -- The reader-config size scales the window; 55% stays the default.
-    l = Magnifier.layout(base{ size_ratio = 0.40 })
-    t.eq(l.w, math.floor(600 * 0.40), "M1b: 40% window")
+    l = Magnifier.layout(base{ size_ratio = 0.70 })
+    t.eq(l.w, math.floor(600 * 0.70), "M1b: 70% window")
     t.eq(l.h, l.w, "M1b: window stays square")
     l = Magnifier.layout(base{ size_ratio = 2.0 })
     t.eq(l.w, math.floor(600 * Magnifier.MAX_SIZE_RATIO),
@@ -61,10 +61,10 @@ return function(t)
     -- The reader-config factor scales the loupe zoom relative to the page.
     l = Magnifier.layout(base{ magnify_factor = 1.5 })
     t.near(l.zoom, 0.75, 0.001, "M2b: 1.5x level")
-    l = Magnifier.layout(base{ magnify_factor = 4.0, zoom = 0.5 })
-    t.near(l.zoom, 2.0, 0.001, "M2b: 4x level")
+    l = Magnifier.layout(base{ magnify_factor = 2.5 })
+    t.near(l.zoom, 1.25, 0.001, "M2b: 2.5x level")
     l = Magnifier.layout(base{ magnify_factor = 99 })
-    t.near(l.zoom, 2.0, 0.001, "M2b: out-of-range factor clamps to the max")
+    t.near(l.zoom, 1.5, 0.001, "M2b: out-of-range factor clamps to the max")
     l = Magnifier.layout(base{ magnify_factor = 0 })
     t.near(l.zoom, 0.5, 0.001, "M2b: out-of-range low factor clamps to 1x")
 

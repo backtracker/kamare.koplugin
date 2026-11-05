@@ -16,13 +16,13 @@ local Magnifier = {}
 -- Fraction of the screen's short side used by the loupe.
 -- The reader config menu overrides this per book/globally.
 Magnifier.SIZE_RATIO = 0.55
-Magnifier.MIN_SIZE_RATIO = 0.30
-Magnifier.MAX_SIZE_RATIO = 0.90
+Magnifier.MIN_SIZE_RATIO = 0.45
+Magnifier.MAX_SIZE_RATIO = 1.00
 -- How much bigger than the page's current display zoom the loupe is.
 -- The reader config menu overrides this per book/globally.
 Magnifier.MAGNIFY_FACTOR = 2.0
 Magnifier.MIN_FACTOR = 1.0
-Magnifier.MAX_FACTOR = 4.0
+Magnifier.MAX_FACTOR = 3.0
 Magnifier.MIN_ZOOM = 0.1
 -- Absolute render-zoom ceiling. The option is a factor relative to the page
 -- zoom, so this must leave room for the largest factor on a fit-height page.
