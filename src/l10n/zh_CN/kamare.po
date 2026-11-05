@@ -1273,3 +1273,12 @@ msgstr "放大范围"
 
 msgid "Size of the magnified window, as a percentage of the screen's short side. A larger window shows more of the page at the chosen zoom level."
 msgstr "放大窗口占屏幕短边的比例。窗口越大，同样倍数下能看到更多页面内容。"
+
+msgid "Magnifier Scope"
+msgstr "放大范围"
+
+msgid "How much of the page around your finger is magnified, as a percentage of the screen's short side. The magnified window is this area times the zoom level."
+msgstr "手指周围被放大的页面范围，占屏幕短边的比例。放大窗口的大小 = 这个范围 × 放大倍数。"
+
+msgid "How much the captured area is enlarged. A higher value makes the window bigger as well, so the same area is shown with bigger text."
+msgstr "这块范围被放大的倍数。倍数越高，窗口也越大，同样的范围显示成更大的字。"

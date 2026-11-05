@@ -13,11 +13,11 @@ local Math = require("optmath")
 
 local Magnifier = {}
 
--- Fraction of the screen's short side used by the loupe.
--- The reader config menu overrides this per book/globally.
-Magnifier.SIZE_RATIO = 0.55
-Magnifier.MIN_SIZE_RATIO = 0.40
-Magnifier.MAX_SIZE_RATIO = 0.80
+-- How much of the page around the finger is captured, as a fraction of the
+-- screen's short side. The reader config menu overrides this per book/globally.
+Magnifier.SCOPE_RATIO = 0.25
+Magnifier.MIN_SCOPE_RATIO = 0.10
+Magnifier.MAX_SCOPE_RATIO = 0.45
 -- How much bigger than the page's current display zoom the loupe is.
 -- The reader config menu overrides this per book/globally.
 Magnifier.MAGNIFY_FACTOR = 2.0
@@ -31,7 +31,7 @@ Magnifier.MAX_ZOOM = 6.0
 --- @param o table
 ---   canvas_w, canvas_h, h_margin, top_margin, bottom_margin,
 ---   native_w, native_h, zoom, zoom_mode, center_x, center_y,
----   finger_x, finger_y, edge_gap, size_ratio, magnify_factor
+---   finger_x, finger_y, edge_gap, scope_ratio, magnify_factor
 --- @return table|nil { x, y, w, h, zoom, src = { x, y, w, h } }
 function Magnifier.layout(o)
     o = o or {}
@@ -78,17 +78,24 @@ function Magnifier.layout(o)
     local page_y = Math.clamp(rect_y + (py - dest_y) / zoom, rect_y, rect_y + rect_h)
 
     local short = math.min(canvas_w, canvas_h)
-    local size_ratio = tonumber(o.size_ratio) or Magnifier.SIZE_RATIO
-    size_ratio = Math.clamp(size_ratio,
-        Magnifier.MIN_SIZE_RATIO, Magnifier.MAX_SIZE_RATIO)
-    local loupe_w = math.floor(short * size_ratio)
-    local loupe_h = loupe_w
     local factor = tonumber(o.magnify_factor) or Magnifier.MAGNIFY_FACTOR
     factor = Math.clamp(factor, Magnifier.MIN_FACTOR, Magnifier.MAX_FACTOR)
     local loupe_zoom = Math.clamp(zoom * factor,
         Magnifier.MIN_ZOOM, Magnifier.MAX_ZOOM)
-    local src_w = math.min(loupe_w / loupe_zoom, rect_w)
-    local src_h = math.min(loupe_h / loupe_zoom, rect_h)
+
+    -- "Scope" is the page area around the finger that gets captured, measured
+    -- in screen pixels. The window is that area at the chosen magnification,
+    -- so both a wider scope and a higher factor make the window bigger.
+    local scope_ratio = tonumber(o.scope_ratio) or Magnifier.SCOPE_RATIO
+    scope_ratio = Math.clamp(scope_ratio,
+        Magnifier.MIN_SCOPE_RATIO, Magnifier.MAX_SCOPE_RATIO)
+    local src_side = math.min(short * scope_ratio / zoom, rect_w, rect_h)
+    local loupe_w = math.min(math.floor(src_side * loupe_zoom), canvas_w, canvas_h)
+    if loupe_w < 8 then return nil end
+    local loupe_h = loupe_w
+
+    local src_w = loupe_w / loupe_zoom
+    local src_h = src_w
     local sx = Math.clamp(page_x - src_w / 2, rect_x, rect_x + rect_w - src_w)
     local sy = Math.clamp(page_y - src_h / 2, rect_y, rect_y + rect_h - src_h)
 

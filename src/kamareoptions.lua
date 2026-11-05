@@ -155,15 +155,15 @@ local KamareOptions = {
                 help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
             },
             {
-                name = "magnifier_size",
-                name_text = _("Magnifier Size"),
+                name = "magnifier_scope",
+                name_text = _("Magnifier Scope"),
                 buttonprogress = true,
-                values = {45, 50, 55, 60, 65, 70, 75},
-                default_pos = 3,
-                default_value = 55,
-                event = "MagnifierSizeUpdate",
-                args = {45, 50, 55, 60, 65, 70, 75},
-                labels = {"45%", "50%", "55%", "60%", "65%", "70%", "75%"},
+                values = {10, 15, 20, 25, 30, 35, 40},
+                default_pos = 4,
+                default_value = 25,
+                event = "MagnifierScopeUpdate",
+                args = {10, 15, 20, 25, 30, 35, 40},
+                labels = {"10%", "15%", "20%", "25%", "30%", "35%", "40%"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -171,10 +171,10 @@ local KamareOptions = {
                 more_options = true,
                 more_options_param = {
                     value_step = 5, value_hold_step = 10,
-                    value_min = 40, value_max = 80,
+                    value_min = 10, value_max = 45,
                     precision = "%.0f",
                 },
-                help_text = _([[Size of the magnified window, as a percentage of the screen's short side. A larger window shows more of the page at the chosen zoom level.]]),
+                help_text = _([[How much of the page around your finger is magnified, as a percentage of the screen's short side. The magnified window is this area times the zoom level.]]),
             },
             {
                 name = "magnifier_zoom",
@@ -196,7 +196,7 @@ local KamareOptions = {
                     value_min = 1.25, value_max = 2.5,
                     precision = "%.2f",
                 },
-                help_text = _([[How much the magnifier enlarges the page under your finger, relative to the page's current size. 2x is the default; higher values show a smaller area with bigger text.]]),
+                help_text = _([[How much the captured area is enlarged. A higher value makes the window bigger as well, so the same area is shown with bigger text.]]),
             }
         }
     },

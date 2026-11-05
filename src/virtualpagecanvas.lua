@@ -67,7 +67,7 @@ local VirtualPageCanvas = Widget:extend{
     -- viewer's reader-config option.
     magnifier_zoom = Magnifier.MAGNIFY_FACTOR,
     -- Loupe window size as a fraction of the screen's short side.
-    magnifier_size = Magnifier.SIZE_RATIO,
+    magnifier_scope = Magnifier.SCOPE_RATIO,
 
     -- Wide-page fit-height mode (Mihon's landscape zoom): in single-page
     -- view, a wide page zooms to fill height and pans horizontally.
@@ -796,7 +796,7 @@ function VirtualPageCanvas:_loupeLayout(finger_x, finger_y)
         center_y = self.center_y_ratio,
         finger_x = finger_x,
         finger_y = finger_y,
-        size_ratio = self.magnifier_size,
+        scope_ratio = self.magnifier_scope,
         magnify_factor = self.magnifier_zoom,
         edge_gap = Screen:scaleBySize(60),
     }

@@ -30,21 +30,23 @@ end
 return function(t)
     -- Page 800x1200 at 0.5 => 400x600 centred in a 600x800 canvas:
     -- dest = (100,100), so finger (300,400) is page (400,600).
+    -- Defaults: 25% scope at 2x => a 50%-of-short-side window.
     local l = Magnifier.layout(base())
     t.ok(l ~= nil, "M1: layout exists")
-    t.eq(l.w, math.floor(600 * Magnifier.SIZE_RATIO),
-        "M1: loupe defaults to 60% of the short side")
+    t.eq(l.w, math.floor(600 * Magnifier.SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR),
+        "M1: window is the scope at the chosen magnification")
     t.eq(l.h, l.w, "M1: loupe is square")
 
-    -- The reader-config size scales the window.
-    l = Magnifier.layout(base{ size_ratio = 0.70 })
-    t.eq(l.w, math.floor(600 * 0.70), "M1b: 70% window")
+    -- The reader-config scope changes how much page is captured.
+    l = Magnifier.layout(base{ scope_ratio = 0.40 })
+    t.eq(l.w, math.floor(600 * 0.40 * Magnifier.MAGNIFY_FACTOR),
+        "M1b: wider scope grows the window")
     t.eq(l.h, l.w, "M1b: window stays square")
-    l = Magnifier.layout(base{ size_ratio = 2.0 })
-    t.eq(l.w, math.floor(600 * Magnifier.MAX_SIZE_RATIO),
+    l = Magnifier.layout(base{ scope_ratio = 2.0 })
+    t.eq(l.w, math.floor(600 * Magnifier.MAX_SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR),
         "M1b: oversized value clamps to the max")
-    l = Magnifier.layout(base{ size_ratio = 0.01 })
-    t.eq(l.w, math.floor(600 * Magnifier.MIN_SIZE_RATIO),
+    l = Magnifier.layout(base{ scope_ratio = 0.01 })
+    t.eq(l.w, math.floor(600 * Magnifier.MIN_SCOPE_RATIO * Magnifier.MAGNIFY_FACTOR),
         "M1b: undersized value clamps to the min")
     t.eq(l.zoom, 1.0, "M1: 0.5 zoom magnifies to the 1.0 floor")
     t.near(l.src.x + l.src.w / 2, 400, 0.001, "M1: finger maps to page x")
@@ -59,11 +61,16 @@ return function(t)
     l = Magnifier.layout(base{ zoom = 4.0 })
     t.eq(l.zoom, Magnifier.MAX_ZOOM, "M2: loupe zoom is capped")
 
-    -- The reader-config factor scales the loupe zoom relative to the page.
+    -- The reader-config factor magnifies the same captured area, so the
+    -- window grows with it instead of showing less content.
     l = Magnifier.layout(base{ magnify_factor = 1.5 })
     t.near(l.zoom, 0.75, 0.001, "M2b: 1.5x level")
+    t.eq(l.w, math.floor(600 * Magnifier.SCOPE_RATIO * 1.5),
+        "M2b: 1.5x shrinks the window")
     l = Magnifier.layout(base{ magnify_factor = 2.5 })
     t.near(l.zoom, 1.25, 0.001, "M2b: 2.5x level")
+    t.eq(l.w, math.floor(600 * Magnifier.SCOPE_RATIO * 2.5),
+        "M2b: 2.5x grows the window")
     l = Magnifier.layout(base{ magnify_factor = 99 })
     t.near(l.zoom, 1.25, 0.001, "M2b: out-of-range factor clamps to the max")
     l = Magnifier.layout(base{ magnify_factor = 0 })
