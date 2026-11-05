@@ -65,7 +65,7 @@ return function(t)
     l = Magnifier.layout(base{ magnify_factor = 2.5 })
     t.near(l.zoom, 1.25, 0.001, "M2b: 2.5x level")
     l = Magnifier.layout(base{ magnify_factor = 99 })
-    t.near(l.zoom, 1.5, 0.001, "M2b: out-of-range factor clamps to the max")
+    t.near(l.zoom, 1.25, 0.001, "M2b: out-of-range factor clamps to the max")
     l = Magnifier.layout(base{ magnify_factor = 0 })
     t.near(l.zoom, 0.625, 0.001, "M2b: out-of-range low factor clamps to 1.25x")
 

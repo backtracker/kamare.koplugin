@@ -158,12 +158,12 @@ local KamareOptions = {
                 name = "magnifier_size",
                 name_text = _("Magnifier Size"),
                 buttonprogress = true,
-                values = {60, 65, 70, 75, 80, 85, 90, 100},
-                default_pos = 1,
-                default_value = 60,
+                values = {45, 50, 55, 60, 65, 70, 75},
+                default_pos = 3,
+                default_value = 55,
                 event = "MagnifierSizeUpdate",
-                args = {60, 65, 70, 75, 80, 85, 90, 100},
-                labels = {"60%", "65%", "70%", "75%", "80%", "85%", "90%", "100%"},
+                args = {45, 50, 55, 60, 65, 70, 75},
+                labels = {"45%", "50%", "55%", "60%", "65%", "70%", "75%"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -171,7 +171,7 @@ local KamareOptions = {
                 more_options = true,
                 more_options_param = {
                     value_step = 5, value_hold_step = 10,
-                    value_min = 45, value_max = 100,
+                    value_min = 40, value_max = 80,
                     precision = "%.0f",
                 },
                 help_text = _([[Size of the magnified window, as a percentage of the screen's short side. A larger window shows more of the page at the chosen zoom level.]]),
@@ -180,12 +180,12 @@ local KamareOptions = {
                 name = "magnifier_zoom",
                 name_text = _("Magnifier Zoom"),
                 buttonprogress = true,
-                values = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0},
+                values = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5},
                 default_pos = 4,
                 default_value = 2.0,
                 event = "MagnifierZoomUpdate",
-                args = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0},
-                labels = {"1.25x", "1.5x", "1.75x", "2x", "2.25x", "2.5x", "2.75x", "3x"},
+                args = {1.25, 1.5, 1.75, 2.0, 2.25, 2.5},
+                labels = {"1.25x", "1.5x", "1.75x", "2x", "2.25x", "2.5x"},
                 name_text_hold_callback = optionsutil.showValues,
                 enabled_func = function(configurable)
                     return (tonumber(configurable.long_press_magnifier) or 1) == 1
@@ -193,7 +193,7 @@ local KamareOptions = {
                 more_options = true,
                 more_options_param = {
                     value_step = 0.25, value_hold_step = 1,
-                    value_min = 1.25, value_max = 3.0,
+                    value_min = 1.25, value_max = 2.5,
                     precision = "%.2f",
                 },
                 help_text = _([[How much the magnifier enlarges the page under your finger, relative to the page's current size. 2x is the default; higher values show a smaller area with bigger text.]]),
