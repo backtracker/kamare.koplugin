@@ -140,6 +140,19 @@ local KamareOptions = {
                 default_value = 1,
                 event = "SetBackgroundColor",
                 help_text = _([[Choose the background color for the image viewer.]]),
+            },
+            {
+                -- Keep this last in the first panel: the config dialog is
+                -- bottom-anchored, so on short screens the top rows can be
+                -- clipped while the last one is always visible.
+                name = "long_press_magnifier",
+                name_text = _("Long-press magnifier"),
+                toggle = {_("off"), _("on")},
+                values = {0, 1},
+                default_value = 1,
+                event = "SetLongPressMagnifier",
+                args = {0, 1},
+                help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
             }
         }
     },

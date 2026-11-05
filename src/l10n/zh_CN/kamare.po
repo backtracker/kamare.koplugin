@@ -1255,3 +1255,9 @@ msgstr "裁切边框"
 
 msgid "Dual-page split"
 msgstr "双页拆分"
+
+msgid "Long-press magnifier"
+msgstr "长按放大"
+
+msgid "Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only."
+msgstr "在页面上按住：手指下方出现局部放大窗口，松手恢复。屏幕顶部 8% 仍用于打开翻页器菜单；仅单页模式可用。"

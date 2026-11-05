@@ -17,6 +17,7 @@ return {
         _("Cache (offline reading and cleanup)"),
         _("Dual-page split"),
         _("Crop borders"),
+        _("Long-press magnifier"),
         _("Bluetooth page turner"),
     },
 }

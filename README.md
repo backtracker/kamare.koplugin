@@ -13,9 +13,17 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 - **Smart Prefetching** - Fast page turns through caching
 - **Progress Tracking** - Syncs with Kavita and KOReader reading stats
 - **Optimized Renderer** - Custom-built for fluid manga reading experience
+- **Long-press Magnifier** - Hold a page to zoom a local area under your finger; configurable in reader settings
 - **Offline Cache** - Download whole chapters, read them with no connection, sync progress on reconnect
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
+
+## What's new in 0.10.7
+
+- **Long-press magnifier.** Hold anywhere on a page to bring up a magnified
+  window under your finger; drag to follow, release to restore. The top 8% of
+  the screen still opens the pager menu. Toggle it in the reader config menu
+  (`Long-press magnifier`, on by default). Page mode only.
 
 ## What's new in 0.10
 

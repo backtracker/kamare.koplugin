@@ -24,6 +24,7 @@ local UIManager = require("ui/uimanager")
 local Blitbuffer = require("ffi/blitbuffer")
 local logger = require("logger")
 local Math = require("optmath")
+local Magnifier = require("kamaremagnifier")
 local time = require("ui/time")
 local Font = require("ui/font")
 local TextWidget = require("ui/widget/textwidget")
@@ -57,6 +58,11 @@ local VirtualPageCanvas = Widget:extend{
 
     page_direction = 0, -- 0: LTR, 1: RTL
     dual_page_gap = 5,
+
+    -- Long-press magnifier state: finger position in canvas-local pixels and
+    -- the last dirty rect, so moving it repaints both the old and new spot.
+    _loupe = nil,
+    _loupe_region = nil,
 
     -- Wide-page fit-height mode (Mihon's landscape zoom): in single-page
     -- view, a wide page zooms to fill height and pans horizontally.
@@ -496,6 +502,10 @@ function VirtualPageCanvas:_paintToImpl(target, x, y)
     else
         self:paintSinglePage(target, x, y)
     end
+
+    if self._loupe then
+        self:paintLoupe(target, x, y)
+    end
 end
 
 
@@ -753,6 +763,109 @@ function VirtualPageCanvas:paintDualPage(target, x, y)
             end
         end
     end
+end
+
+--- Geometry for the long-press magnifier, in canvas-local pixels.
+--- Returns nil when the magnifier does not apply to the current state.
+function VirtualPageCanvas:_loupeLayout(finger_x, finger_y)
+    if not (self.document and self.document.is_open) then return nil end
+    if self.view_mode ~= 0 then return nil end
+    if not self.dimen or self.dimen.w <= 0 or self.dimen.h <= 0 then return nil end
+
+    self:_ensureZoom()
+    local page = Math.clamp(self.current_page or 1, 1, self.document:getPageCount())
+    local dims = self.document:getNativePageDimensions(page)
+    if not dims or dims.w <= 0 or dims.h <= 0 then return nil end
+
+    local layout = Magnifier.layout{
+        canvas_w = self.dimen.w,
+        canvas_h = self.dimen.h,
+        h_margin = self.h_margin,
+        top_margin = self.top_margin,
+        bottom_margin = self.bottom_margin,
+        native_w = dims.w,
+        native_h = dims.h,
+        zoom = self.zoom,
+        zoom_mode = self.zoom_mode,
+        center_x = self.center_x_ratio,
+        center_y = self.center_y_ratio,
+        finger_x = finger_x,
+        finger_y = finger_y,
+        edge_gap = Screen:scaleBySize(60),
+    }
+    if not layout then return nil end
+
+    layout.page = page
+    layout.src = Geom:new(layout.src)
+    layout.render_w, layout.render_h = self:_renderDimsFor(dims.w, dims.h)
+    return layout
+end
+
+function VirtualPageCanvas:paintLoupe(target, x, y)
+    local loupe = self._loupe
+    if not loupe then return end
+    local layout = self:_loupeLayout(loupe.x, loupe.y)
+    if not layout then return end
+
+    local lx, ly = x + layout.x, y + layout.y
+    local lw, lh = layout.w, layout.h
+
+    local render_w, render_h = layout.render_w, layout.render_h
+    local ok, result = pcall(function()
+        return self.document:drawPageTiled(target, lx, ly,
+            layout.src, layout.page, layout.zoom, nil, 0, true,
+            render_w, render_h, self.render_quality)
+    end)
+    if not ok or result == "pending" then
+        self:_paintPlaceholder(target, lx, ly, lw, lh)
+        if self.on_pending_page then self.on_pending_page(layout.page) end
+    else
+        -- Small crosshair so the magnified point is obvious.
+        local cx = lx + math.floor(lw / 2)
+        local cy = ly + math.floor(lh / 2)
+        target:paintRect(cx - 4, cy, 9, 1, Blitbuffer.COLOR_BLACK)
+        target:paintRect(cx, cy - 4, 1, 9, Blitbuffer.COLOR_BLACK)
+    end
+
+    -- 2 px border drawn inside the window, so it never reaches outside.
+    local border = 2
+    target:paintRect(lx, ly, lw, border, Blitbuffer.COLOR_BLACK)
+    target:paintRect(lx, ly + lh - border, lw, border, Blitbuffer.COLOR_BLACK)
+    target:paintRect(lx, ly, border, lh, Blitbuffer.COLOR_BLACK)
+    target:paintRect(lx + lw - border, ly, border, lh, Blitbuffer.COLOR_BLACK)
+end
+
+function VirtualPageCanvas:_loupeRegionFor(finger_x, finger_y)
+    local layout = self:_loupeLayout(finger_x, finger_y)
+    if not layout then return nil end
+    local origin_x = (self.dimen and self.dimen.x) or 0
+    local origin_y = (self.dimen and self.dimen.y) or 0
+    return Geom:new{
+        x = origin_x + layout.x - 2,
+        y = origin_y + layout.y - 2,
+        w = layout.w + 4,
+        h = layout.h + 4,
+    }
+end
+
+--- Move the magnifier; returns the dirty rect covering the old and new
+--- positions (or nil when the magnifier does not apply).
+function VirtualPageCanvas:moveLoupe(finger_x, finger_y)
+    local old_region = self._loupe and self._loupe_region or nil
+    self._loupe = { x = finger_x, y = finger_y }
+    local region = self:_loupeRegionFor(finger_x, finger_y)
+    self._loupe_region = region
+    if not region then return nil end
+    if old_region then return old_region:combine(region) end
+    return region
+end
+
+--- End the magnifier; returns the last dirty rect.
+function VirtualPageCanvas:endLoupe()
+    local region = self._loupe_region
+    self._loupe = nil
+    self._loupe_region = nil
+    return region
 end
 
 function VirtualPageCanvas:_prepareLayout()

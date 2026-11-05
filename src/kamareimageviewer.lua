@@ -119,6 +119,9 @@ local KamareImageViewer = InputContainer:extend{
     -- Trim uniform white/black margins around page content (Mihon-style).
     crop_borders = false,
 
+    -- Long-press magnifier: hold on a page to show a local magnified window.
+    long_press_magnifier = 1, -- 0 = off, 1 = on
+
     scroll_distance = 25, -- percentage (25, 50, 75, 100)
     h_margin = 0, -- left/right viewport margin
     top_margin = 0, -- top viewport margin
@@ -674,6 +677,7 @@ function KamareImageViewer:loadSettings()
     self.configurable.wide_page_mode = self.wide_page_mode
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
+    self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -704,6 +708,7 @@ function KamareImageViewer:loadSettings()
     self.crop_borders = self.configurable.crop_borders == true
         or self.configurable.crop_borders == 1
         or self.configurable.crop_borders == "1"
+    self.long_press_magnifier = tonumber(self.configurable.long_press_magnifier) or 1
     self.zoom_mode = self.configurable.zoom_mode_type or 0
     self.page_gap_height = self.configurable.page_gap_height or 8
     self.scroll_distance = self.configurable.scroll_distance or 25
@@ -735,6 +740,7 @@ function KamareImageViewer:syncAndSaveSettings()
     self.configurable.wide_page_mode = self.wide_page_mode
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
+    self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -1113,12 +1119,44 @@ function KamareImageViewer:initConfigGesListener()
         {
             -- 阅读中也能用的翻页器入口：长按屏幕顶部 8%。
             -- 书是从月读打开的、进不去 kamare 书库时，用它做诊断。
+            -- 页面级长按放大镜覆盖全屏，所以这里必须声明 overrides 让顶部
+            -- 8% 的翻页器菜单先命中（InputContainer 按依赖顺序取第一个返回
+            -- true 的区）。
             id = "kamare_pager_hold",
             ges = "hold",
             screen_zone = {
                 ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 0.08,
             },
+            overrides = {
+                "kamare_page_hold",
+            },
             handler = function() return self:onPagerMenu() end,
+        },
+        {
+            -- 长按页面 → 跟手放大镜。hold / hold_pan / hold_release 是三个
+            -- 独立手势，必须分别注册。
+            id = "kamare_page_hold",
+            ges = "hold",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1,
+            },
+            handler = function(ges) return self:onPageHold(ges) end,
+        },
+        {
+            id = "kamare_page_hold_pan",
+            ges = "hold_pan",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1,
+            },
+            handler = function(ges) return self:onPageHoldPan(ges) end,
+        },
+        {
+            id = "kamare_page_hold_release",
+            ges = "hold_release",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1,
+            },
+            handler = function(ges) return self:onPageHoldRelease(ges) end,
         },
         {
             -- 遥控器/翻页器的「单击」在 Android 上是一条指针拖动，不是 keycode：
@@ -1206,6 +1244,63 @@ function KamareImageViewer:onTapConfig()
     return self:onShowConfigMenu()
 end
 
+-- Long-press magnifier -------------------------------------------------------
+-- The canvas owns the drawing; the viewer only feeds it the finger position
+-- and asks for the dirty rect. Only page mode is supported: the source-point
+-- mapping in scroll/dual modes is different and not part of v1.
+
+function KamareImageViewer:onPageHold(ges)
+    if self.long_press_magnifier ~= 1 then return false end
+    if self.view_mode ~= 0 then return false end
+    local canvas = self.canvas
+    if not (canvas and canvas.dimen and ges and ges.pos) then return false end
+    if not (self.virtual_document and self.virtual_document.is_open) then return false end
+
+    local fx = ges.pos.x - (canvas.dimen.x or 0)
+    local fy = ges.pos.y - (canvas.dimen.y or 0)
+    if fx < 0 or fy < 0 or fx > canvas.dimen.w or fy > canvas.dimen.h then
+        return false
+    end
+
+    local region = canvas:moveLoupe(fx, fy)
+    if region then
+        UIManager:setDirty(self, "partial", region)
+    end
+    return true
+end
+
+function KamareImageViewer:onPageHoldPan(ges)
+    local canvas = self.canvas
+    if not (canvas and canvas.dimen and canvas._loupe and ges and ges.pos) then
+        return false
+    end
+    if self.long_press_magnifier ~= 1 or self.view_mode ~= 0 then return false end
+
+    local fx = ges.pos.x - (canvas.dimen.x or 0)
+    local fy = ges.pos.y - (canvas.dimen.y or 0)
+    -- e-ink repaints are expensive; ignore tiny movements (16 px) so the
+    -- magnifier follows in visible steps instead of churning every pixel.
+    if math.abs(fx - canvas._loupe.x) < 16 and math.abs(fy - canvas._loupe.y) < 16 then
+        return true
+    end
+
+    local region = canvas:moveLoupe(fx, fy)
+    if region then
+        UIManager:setDirty(self, "partial", region)
+    end
+    return true
+end
+
+function KamareImageViewer:onPageHoldRelease()
+    local canvas = self.canvas
+    if not (canvas and canvas._loupe) then return false end
+    local region = canvas:endLoupe()
+    if region then
+        UIManager:setDirty(self, "partial", region)
+    end
+    return true
+end
+
 function KamareImageViewer:onTapMinibar()
     if not self.footer_settings.enabled or not self.virtual_document or self._images_list_nb <= 1 then
         return false
@@ -1240,6 +1335,7 @@ function KamareImageViewer:onShowConfigMenu()
     self.configurable.wide_page_mode = self.wide_page_mode
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
+    self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.dual_page_gap = self.dual_page_gap
@@ -1817,6 +1913,20 @@ function KamareImageViewer:onSetCropBorders(value)
     if enabled then
         self:_kickCropDetection()
     end
+    return true
+end
+
+function KamareImageViewer:onSetLongPressMagnifier(value)
+    local enabled = value == true or value == 1 or value == "1"
+    if enabled == (self.long_press_magnifier == 1) then return true end
+
+    self.long_press_magnifier = enabled and 1 or 0
+    self.configurable.long_press_magnifier = self.long_press_magnifier
+    if not enabled and self.canvas then
+        local region = self.canvas:endLoupe()
+        if region then UIManager:setDirty(self, "partial", region) end
+    end
+    self:syncAndSaveSettings()
     return true
 end
 
@@ -3810,6 +3920,7 @@ function KamareImageViewer:onClose()
 end
 
 function KamareImageViewer:onCloseWidget()
+    if self.canvas then self.canvas:endLoupe() end
     -- Stop the pager rescan loop; the attached fd is intentionally kept (the
     -- device is shared with the rest of the process).
     Pager.unwatch_page()
