@@ -1,366 +1,256 @@
-# Kamare (kamare.koplugin)
+# Kamare（kamare.koplugin）
 
-**kamare** is a manga reader plugin for [KOReader](https://github.com/koreader/koreader) that 
-connects to [Kavita](https://github.com/Kareadita/Kavita).
+**Kamare** 是一个 [KOReader](https://github.com/koreader/koreader) 漫画阅读插件，直接连接自建的 [Kavita](https://github.com/Kareadita/Kavita) 服务器，不经过 OPDS。它自带漫画渲染器，支持长条（韩漫）、双页扫描、裁切边框、临时合页和蓝牙翻页器。
 
-This KOReader plugin provides a seamless way to read manga from Kavita without going through OPDS, 
-featuring a custom renderer that also supports long-strip formats commonly used in manhwa.
+> 本项目基于 [fpammer/kamare.koplugin](https://github.com/fpammer/kamare.koplugin) 继续开发。
 
-## Features
+## 特性
 
-- **Direct Kavita Integration** - Browse your library without OPDS limitations
-- **Multiple Reading Modes** - Page, scroll (long-strip), and dual-page modes
-- **Smart Prefetching** - Fast page turns through caching
-- **Progress Tracking** - Syncs with Kavita and KOReader reading stats
-- **Optimized Renderer** - Custom-built for fluid manga reading experience
-- **Long-press Magnifier** - Hold a page to zoom a local area under your finger; configurable in reader settings
-- **Temporary Page Join** - Swipe down in page mode to show the current page and the next one as one spread; the next page turn leaves it
-- **Offline Cache** - Download whole chapters, read them with no connection, sync progress on reconnect
+- **直连 Kavita** —— 不用 OPDS，直接浏览书库、系列和章节。
+- **三种阅读模式** —— 单页、连续滚动（长条）、双页。
+- **下滑临时合页** —— 单页模式下向下滑，把本页和下一页合成一张跨页；再下滑退出，翻页自动跳过合过的两页。一次性操作，不改阅读模式。
+- **宽页按书缝切分** —— 双页扫描的横图可以按真实书缝切成左右两半阅读；裁切边框后仍然正确。
+- **裁切边框** —— 自动裁掉页面四周纯白/纯黑的边距（类似 Mihon）。
+- **长按放大镜** —— 按住页面任意位置，出现跟手放大窗口，松手还原。
+- **蓝牙翻页器** —— 自动接管翻页器节点；标准翻页键免配置，特殊按键可以自己指认；支持 Android 遥控器。
+- **离线缓存** —— 整章下载为 cbz，断网可读，恢复连接后把进度推回 Kavita。
+- **进度与统计** —— 同步 Kavita 阅读进度，同时接入 KOReader 阅读统计。
+- **每系列独立设置** —— 全局默认 + 每系列覆盖，换书不串味。
 
-Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
+## 截图
 
-## What's new in 0.10.11
-
-- **Temporary page join (合页).** Swipe down in single-page mode to show the
-  current page and the next one together; swipe down again to leave. For a
-  split wide page, either half joins both halves of the same physical page,
-  with the cropped gutter removed; for two normal pages the reading direction
-  only decides which one is on the left. The join is one-shot: the next page
-  turn skips the pair (5+6 -> 7). Wide pages (already a spread), strip pages,
-  and the last page are left alone. Nothing is written to settings and
-  `view_mode` is not changed. Toggle it in the reader config menu's new
-  **Interaction** tab (`Swipe down to join pages`, on by default); that update
-  also regroups the menu into Reading / Layout / Interaction / Pager / Settings
-  and moves the pager diagnostics actions behind a `Pager tools` dialog.
-  `Join Direction` (Auto / LTR / RTL) sets the left/right order independently
-  of Page Direction; split halves always keep their physical order.
-
-## What's new in 0.10.10
-
-- **Pager settings in the reader menu.** The Bluetooth page-turner now has its
-  own tab in the bottom reader config menu (Bluetooth icon, right before
-  Settings): enable/disable, key bindings, swipe direction, diagnostics, key
-  sniffing, and rescanning. Long-pressing the top 8% of a page opens that tab
-  directly, so the old standalone pager dialog is gone.
-
-## What's new in 0.10.9
-
-- **Wide-page split is flush again.** Two-page scans whose artwork reaches all
-  four outer edges used to be split at the geometric midpoint, leaving half of
-  the white gutter as a strip on each half (very visible on 北斗神拳 and
-  similar scanned tankōbon). The gutter is now found from the page's dominant
-  paper colour even when no outer margin can be cropped, and the split follows
-  it; asymmetric spreads such as covers are covered too.
-
-## What's new in 0.10.8
-
-- **Magnifier size and zoom.** The reader config menu now has two controls
-  next to the on/off switch, both saved globally and per series like the other
-  reading options:
-  - `Magnifier Scope` — how much of the page around your finger is captured,
-    as a share of the screen's short side (15% / 20% / 25% / 30% / 35% / 40% /
-    50% / 60%, default 25%; `⋮` allows 10–70%).
-  - `Magnifier Zoom` — how much that captured area is enlarged
-    (1.25x / 1.5x / 1.75x / 2x / 2.25x / 2.5x, default 2x; `⋮` allows
-    1.25–2.5). Higher zoom also makes the window bigger, so the same area is
-    shown with bigger text instead of showing less.
-  Hold a row name to see the current value; changing either one while the
-  loupe is open repaints it immediately.
-
-## What's new in 0.10.7
-
-- **Long-press magnifier.** Hold anywhere on a page to bring up a magnified
-  window under your finger; drag to follow, release to restore. The top 8% of
-  the screen still opens the pager menu. Toggle it in the reader config menu
-  (`Long-press magnifier`, on by default). Page mode only.
-
-## What's new in 0.10
-
-0.10 was built in two passes: the cache itself first, then the public API another
-plugin can drive.
-
-### Pass 1 — offline cache (Kamare on its own)
-
-- **Whole-chapter downloads.** One request per chapter
-  (`/api/Download/chapter`), resumable with HTTP Range, three attempts with
-  2/8/20 s backoff. A 403, a multi-file chapter, a non-archive response or a
-  page-order mismatch falls back to fetching page by page.
-- **Archive extraction that matches Kavita.** Entry order replicates Kavita's
-  flatten + natural sort, so page N locally is page N on the server; the page
-  list is validated against `file-dimensions` before the archive is accepted.
-- **One serial download queue** for the whole plugin: live progress, pause /
-  resume / retry, Wi-Fi-only by default, a low-space precheck that pauses
-  instead of failing, persisted across restarts and never started automatically.
-- **Offline shelf.** Opening the plugin without a connection goes straight to
-  the cached series list. Uncached chapters are shown but disabled, and a
-  cached chapter opens from disk with zero image requests.
-- **Offline reading journal.** Positions are kept in
-  `settings/kamare-journal.json` (never deleted with the cache), debounced to
-  disk, and pushed back monotonically on reconnect — a position is only pushed
-  when it is ahead of the server's.
-- **Cache management**: usage, sorting, delete read chapters, update outdated
-  chapters, clear per server or everything, optional size cap, and “cache only
-  unread chapters” from the series menu.
-- **Stable cache identity**: `serverKey` survives URL/name edits and API-key
-  rotation, so downloads are not orphaned by a settings change.
-- **Simulated offline** switch on devices without a Wi-Fi toggle (marked debug
-  in the menu), so the offline paths can be exercised on a desktop emulator.
-
-### Pass 2 — public cache API for Moon
-
-- **Versioned facade**: `require("kamarecache")` exposes `API_VERSION = 1` plus
-  a `capabilities` table (`status`, `summary`, `enqueue`, `delete`, `server`,
-  `resume`, `queue`, `queue_control`, `index`, `open`, `estimate`, `chapters`,
-  `delete_all`). New capabilities are additive; only a breaking change bumps
-  the major version.
-- **Safe probing**: callers use `pcall(require, "kamarecache")`; a missing
-  module, another major version, or a missing capability degrades silently
-  instead of raising, and one absent capability only disables that feature.
-- **Stable failures**: `nil, code, message` with snake_case codes
-  (`unknown_server`, `offline_not_cached`, `viewer_running`, `chapter_open`,
-  `not_enough_space`, …). Read-only calls never create a server key and never
-  flush settings.
-- **Cleanup plan limits**: `chapters()` judges "read" from the journal plus the
-  download-time snapshot (old chapters can lose their journal entry), reports
-  per-chapter byte estimates, and a `.part` without an index entry is only
-  visible to `delete_all()`. Open-chapter protection covers this process only.
-- **One writer per process**: Kamare publishes its settings/client at startup
-  and adopts any store/journal/queue a caller built first, so there is never a
-  second queue writing the same cache.
-- **Server mirroring and viewer hand-off**: `register_server` mirrors another
-  plugin's base URL + API key; `open` decides cache-first vs. stream, offline
-  refusal, and the start page, and it owns the viewer lifecycle. The `on_next`
-  hook fires after the viewer has closed, so a caller may open the next chapter
-  directly from it.
-- **Documented deviations**: `open` builds the read (journal) tier even when
-  `start_page` is explicit, so the offline session is not lost;
-  `queue_pause` on an empty queue returns `true` and the state honestly stays
-  `idle`.
-
-## Screenshots
-
-<table>
-<tr>
-<td align="center" valign="top">
-<img src="doc/main-screen.png" alt="Library home">
-<br><b>Library Home</b>
-<br>Browse by On Deck, Recently Updated, and Want to Read
-</td>
-<td align="center" valign="top">
-<img src="doc/series-screen.png" alt="Chapter list">
-<br><b>Chapter List</b>
-<br>View all chapters with progress tracking
-</td>
-</tr>
-</table>
-
-## Reading Modes
-
-<table>
-<tr>
-<td align="center" valign="top">
-<img src="doc/page-mode.png" alt="Page mode">
-<br><b>Page Mode</b>
-<br>Classic single-page view
-</td>
-<td align="center" valign="top">
-<img src="doc/scroll-mode.png" alt="Scroll mode">
-<br><b>Scroll Mode</b>
-<br>For webtoons and long-strip formats
-</td>
-<td align="center" valign="top">
-<img src="doc/dual-page-mode.png" alt="Dual page mode">
-<br><b>Dual Page Mode</b>
-<br>More Book like horizontally or on wider screens
-</td>
-</tr>
-</table>
-
-## Installation & Setup
-
-1. Download the latest `kamare.koplugin.zip` from the [releases page](https://github.com/fpammer/kamare.koplugin/releases/latest).
-2. Extract the ZIP and copy the `kamare.koplugin` folder into the `plugins` directory of your KOReader installation.
-3. Restart KOReader to load the plugin.
-4. Open the plugin from the KOReader menu (🔍) and add your Kavita server from the burger menu (top-left).:
 <p align="center">
-<img src="doc/server-setup.png" width="500" alt="Server setup">
+  <img src="doc/reader-join-spread.png" alt="下滑合页：把一张横页的两个半页并回整张跨页" width="880">
+  <br>
+  <sub><b>下滑合页</b>：Split 横页的两个半页并回整张跨页；两半按裁切后的内容紧贴，排除中间书缝。</sub>
 </p>
-5. Enter a server name, URL (with protocol eg. https://kavita.hostname.zone), and Kavita API key
 
-### Getting Your Kavita API Key
+<table>
+<tr>
+<td align="center" valign="top" width="50%">
+<img src="doc/reader-page.png" alt="单页阅读" width="300">
+<br><b>单页阅读</b>
+<br>按适应屏幕或原始比例显示
+</td>
+<td align="center" valign="top" width="50%">
+<img src="doc/reader-join-pair.png" alt="两张单页合页" width="440">
+<br><b>两张单页合页</b>
+<br>合页方向为「右至左」，日漫第 5、6 页显示为左 6、右 5
+</td>
+</tr>
+</table>
 
-1. Log into your Kavita web interface
-2. Go to **Settings** → **Account** → **API Key**
-3. Generate a new key if needed and type it to the setup dialog
+<p align="center">
+  <img src="doc/settings-interaction.png" alt="操作 tab：合页方向与下滑合页开关" width="300">
+  <br>
+  <sub><b>操作 tab</b>：下滑合页开关、合页方向（自动 / 左至右 / 右至左）和长按放大。</sub>
+</p>
 
-## Offline cache
+<table>
+<tr>
+<td align="center" valign="top" width="50%">
+<img src="doc/main-screen.png" alt="书库首页" width="280">
+<br><b>书库首页</b>
+<br>On Deck、最近更新、想读
+</td>
+<td align="center" valign="top" width="50%">
+<img src="doc/series-screen.png" alt="章节列表" width="280">
+<br><b>章节列表</b>
+<br>查看章节与阅读进度
+</td>
+</tr>
+</table>
 
-Kamare can download whole Kavita chapters (one cbz per chapter), read them
-without a network connection, and push the reading position back to Kavita on
-reconnect. The cache lives under `kamare/cache/<serverKey>/` in the KOReader
-data directory; reading progress stays in `settings/kamare-journal.json` and is
-never deleted together with cached pages.
+## 下滑合页
 
-- Cache entries: long-press a chapter/volume in the series page, or use the
-  top-left menu for whole-series downloads (whole series, unread only, from the
-  current chapter on, or the next N volumes).
-- Manage storage: top-left menu → **Cached chapters** (usage, sorting, delete
-  read chapters, update outdated chapters, clear cache, optional size limit).
-- Offline: opening the plugin without a connection goes straight to the cached
-  shelf. Uncached chapters are shown but disabled.
-- Reconnect: pending positions are pushed once (monotonic rule: a position is
-  only pushed when it is ahead of the server's). Offline reading time stays
-  local; Kavita sessions still get one normal 1-page activity per push, so
-  Kavita's offline page counts stay low by design.
+在**单页模式**下，从屏幕任意位置向下滑动：
 
-### Cache API for other plugins
+| 当前页 | 合页结果 |
+| --- | --- |
+| Split 横页的左半或右半 | 不管停在哪一半，都合回**同一张物理页**；两个半页紧贴，书缝被排除 |
+| 普通竖页 | 本页 + **数值下一页**（第 5 页 → 5+6，第 6 页 → 6+7） |
 
-The cache is also a versioned API, so another plugin (Moon's Kavita source is
-the intended consumer) can download, inspect and open cached chapters without
-re-implementing any of it. See [What's new in 0.10](#pass-2--public-cache-api-for-moon)
-for the capability list and error-code contract.
+- **合页方向**只影响两张独立页的左右摆放：`自动` 跟随「翻页方向」，`左至右` / `右至左` 可以单独覆盖。日漫第 5、6 页设为「右至左」后显示为**左 6、右 5**；Split 的两半永远按物理左右摆放，不受影响。
+- **退出**：再下滑一次退出并停在当前页；按「下一页」会跳过整个合页对（5+6 → 7），按「上一页」到 4。
+- **一次性**：不写任何持久设置，不切换 `view_mode`，不改变双页模式。
+- **失败不动**：整张横图（`Wide Page = Fit`，本身已是完整跨页）、长条页、最后一页、下一页不是普通竖页时，下滑只写日志，不翻页。
+- 合页显示期间长按放大镜会暂时禁用；切章、关书、改视图模式/裁切/阅读方向时合页自动清空。
 
-Releases inject the plugin version into `kamareversion.lua`; a plain checkout
-reports `0.10.6-dev`. The cache API version is independent of the plugin
-version (`API_VERSION = 1`, plugin 0.10.x).
+## 阅读模式
 
-### Feature manifest
+<table>
+<tr>
+<td align="center" valign="top">
+<img src="doc/page-mode.png" alt="单页模式" width="260">
+<br><b>单页</b>
+<br>经典的单页阅读
+</td>
+<td align="center" valign="top">
+<img src="doc/scroll-mode.png" alt="连续滚动模式" width="260">
+<br><b>连续滚动</b>
+<br>适合条漫和长条格式
+</td>
+<td align="center" valign="top">
+<img src="doc/dual-page-mode.png" alt="双页模式" width="380">
+<br><b>双页</b>
+<br>横屏或宽屏下更像实体书
+</td>
+</tr>
+</table>
 
-`kamarefeatures.lua` lists the user-visible features Moon shows on its Kavita
-cache page. Moon renders the strings as-is and does not interpret IDs, so this
-list belongs to Kamare: add or remove entries here and ship the translations in
-the plugin's own gettext catalog. Older builds without the file simply show no
-feature list. `api_version` is bumped only when the manifest shape changes.
+- **宽页**：`适应` 把整张横图缩小显示；`分割` 按书缝切成左右两个逻辑页，可以逐半阅读；`适应高度` 放大到填满屏幕高度，左右拖动查看（仅单页模式）。
+- **分割方向**：`自动` 跟随翻页方向；也可以强制 `左至右` / `右至左`，用来处理装订方向相反的书。
+- **双页模式 vs 临时合页**：双页模式是持久阅读模式，按奇偶自动配对；临时合页是一次性的手动指定，会把裁切后的内容并在一起，翻页后立即退出，不会改变任何设置。
 
-## Bluetooth page turner
+## 安装与 Kavita 设置
 
-A Bluetooth page turner (the clicker kind, usually sold for phones) arrives as
-an ordinary evdev keyboard. On touch-only devices KOReader never opens that
-node, so the keys go nowhere: Kamare finds it, opens it, teaches KOReader its
-key codes, and turns pages with it. Works with or without Moon.
+1. 从 [Releases](https://github.com/backtracker/kamare.koplugin/releases/latest) 下载最新的 `kamare.koplugin.zip`。
+2. 解压后把 `kamare.koplugin` 文件夹放到 KOReader 的 `plugins/` 目录。
+3. 重启 KOReader。
+4. 从 KOReader 菜单（🔍）打开 Kamare，点左上角菜单 → **添加 Kavita 服务器**。
+5. 填写服务器名称、URL（带协议，例如 `https://kavita.example.com`）和 API Key。
 
-- **Standard page keys need no setup.** Anything KOReader already names
-  `LPgFwd`/`LPgBack` (PageUp/PageDown, volume keys, arrow keys) turns the page
-  as-is; the pager only adds the missing path on devices where the reading page
-  never receives those key presses.
-- **Unusual keys are yours to assign; Kamare does not guess.** A phone remote
-  that sends zoom/shutter codes (e.g. `168`/`169`) will not page until you bind
-  it. Open a book and **long-press the top 8% of the screen** → **Pager keys**:
-  - **Set up by pressing twice** asks for the next-page button, then the
-    previous-page button, and refuses to bind the same key to both;
-  - the two rows below show the current codes and let you add or remove one key
-    at a time.
-  Each action holds a list of raw key codes (up to 8), so one action can be
-  driven by several buttons; **Reset to defaults** brings back `104`/`109`.
-  Bindings are stored per device in `G_reader_settings`, so whatever you set
-  here is what applies here.
-- **Works in every reading mode** — page, dual page and continuous scroll.
-- **Only inside the Kamare viewer.** A binding is consumed only while the
-  manga page is the topmost window: with a menu or dialog open the key goes to
-  that dialog instead. Moon's own *physical page keys* setting is a separate,
-  independent feature and is untouched.
-- **On Android there is no node to take over** — KOReader gets keys straight
-  from the system, and they carry Android keycodes. Kamare observes every key
-  at the input backend (and again at the keyboard handler, exactly once), so
-  binding works there too; keys KOReader already maps to page turns are also
-  handled directly, without relying on the reading page's key table.
-  KOReader's Android bridge also hands a few key classes back to the system
-  (media/headset/mute keys, and volume keys when *Ignore volume keys* is on), so
-  those never reach Lua at all. Kamare takes them over at
-  `AInputQueue_finishEvent` while you are binding a key — and afterwards for
-  codes you actually bound, plus the unambiguous previous/next media codes
-  (87/88), only while the manga page is on top. A remote whose left/right
-  buttons send such a code can therefore be bound. Power keys are never taken
-  over; volume keys and play/pause are only taken over when you bind them
-  explicitly.
-- **Remotes whose buttons act like a finger drag.** Some remotes — and the ring
-  keys of camera-style Android remotes — do not send a key code on a short
-  press at all: they send a quick pointer drag. That is why the same button
-  pages in KOReader's own reader but cannot be bound: there is no code to bind.
-  The Kamare viewer now registers a full-screen **swipe**: left/right, and (in
-  page/dual mode) up/down, turn pages. If the directions feel reversed for your
-  remote, long-press the top of the page → **Swipe page turn: normal/inverted**;
-  the choice persists and does not touch key bindings.
-- **Diagnosis built in.** Long-press the top of a reading page → **Pager
-  diagnostics**: state, backend, current bindings, the last key received, the
-  last swipe (direction and action), and every input node with the full list of
-  key codes it declares. The same menu has a 30-second **key sniffer** that
-  temporarily opens *every* input node (needed on Kindle/Kobo for buttons that
-  live on a node Kamare has not taken over) and **Save pager diagnostics to
-  file**. On Android, where there is no node to open, the same entry reclaims
-  every key KOReader would hand back to the system for 30 seconds, shows its
-  code in **Recent keys**, and does not turn pages — the fastest way to find out
-  what a non-working button sends.
-- **Connection is not Kamare's job.** On Kindle the
-  [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough)
-  daemon turns the BLE remote into a virtual keyboard (Kamare starts the daemon
-  if it is installed but not running). On Kobo, pair it with the system
-  Bluetooth stack; Kamare picks up the `uhid` node. The Kobo path has not been
-  verified on real hardware end to end.
-- **Coexists with `pageturner.koplugin`.** Both may be installed: whichever
-  takes the device first, only the plugin that binds a key swallows it, and
-  Kamare handles the standard `GotoViewRel` event that pageturner broadcasts, so
-  a page never turns twice.
-- **Not covered:** reading EPUBs/PDFs in KOReader's own reader (Kamare only
-  handles its own manga viewer) and hold-to-scroll. Those stay out of scope for
-  now.
-- Status: Kamare's own top-left menu → **Bluetooth pager status**. The
-  enable/disable switch and **Rescan** live in Moon's settings
-  (**Reader → Pager**); both read the same setting.
-- For other plugins: `require("kamarepager")` exposes `api_version`,
-  `capabilities`, `status()`, `on()`/`off()` and `bindings()` — the same
-  probe-and-degrade contract as the cache API.
+<p align="center">
+  <img src="doc/server-setup.png" alt="添加 Kavita 服务器" width="500">
+</p>
 
-## Development
+### 获取 Kavita API Key
+
+1. 登录 Kavita 网页端。
+2. 进入 **Settings → Account → API Key**。
+3. 如果没有 key，生成一个，然后粘贴到 Kamare 的添加服务器对话框。
+
+已在 Kindle Paperwhite（第 2 代）和 Kobo Libra Colour 上测试。
+
+## 离线缓存
+
+Kamare 可以把整个 Kavita 章节下载成一个 cbz，断网阅读，并在恢复连接后把阅读位置推回 Kavita。
+
+- **下载**：在系列页长按章节/卷，或用左上角菜单整系列下载（整系列、只下未读、从当前章节开始、接下来 N 卷）。
+- **队列**：整个插件只有一个串行下载队列，支持进度、暂停/继续/重试；默认仅 Wi-Fi；空间不足时暂停而不是失败；重启后保留，不会自动开始。
+- **离线书架**：没有网络时直接进入已缓存书架；未缓存的章节会显示但不可点。缓存章节从磁盘打开，零图片请求。
+- **阅读日志**：位置保存在 `settings/kamare-journal.json`，不会跟缓存一起删除；重连后按单调规则推送（只有比服务器更靠前的位置才推）。
+- **缓存管理**：左上角菜单 → **已缓存章节**，可以查看占用、排序、删除已读、更新过期章节、清空缓存、设置容量上限。
+- **缓存位置**：`kamare/cache/<serverKey>/`；`serverKey` 在 URL/名称修改和 API Key 轮换后保持不变，不会让已有下载变成孤儿。
+
+## 蓝牙翻页器
+
+蓝牙翻页器（常见于手机遥控器/短视频遥控器）在系统里就是一个普通的 evdev 键盘。KOReader 在纯触屏设备上通常不会打开这个节点，Kamare 会找到它、打开它，并把键码教给 KOReader。
+
+- **标准翻页键免配置**：KOReader 已经认得的 `LPgFwd` / `LPgBack`（PageUp/PageDown、音量键、方向键）直接翻页；Kamare 只补上阅读页收不到按键时缺失的那条路。
+- **特殊按键自己指认**：长按阅读页**顶部 8%** → 蓝牙 tab → **翻页器按键**：
+  - 「按两下设置」先按下一页键，再按上一页键；同一个键不能同时绑两个动作；
+  - 下面两行显示当前键码，可以逐个添加/删除；
+  - 每个动作最多 8 个键码；**恢复默认**会回到 `104` / `109`；
+  - 绑定按设备保存在 `G_reader_settings`。
+- **所有阅读模式可用**：单页、双页、连续滚动都能翻页。
+- **只在 Kamare 阅读页生效**：阅读页在最上层时按键才会被吃掉；菜单/对话框打开时按键交给对话框。月读自己的「物理翻页键」设置是另一套，不受影响。
+- **Android**：没有 `/dev/input` 节点，键码由系统直接送进 KOReader；Kamare 在输入后端和键盘处理器各观察一次（同一个键只处理一次）。KOReader 的 Android 桥会把媒体键、耳机键、静音键和部分音量键还给系统，Kamare 在绑定期间从 `AInputQueue_finishEvent` 接管它们；绑定完成后只接管真正绑过的码，以及语义明确的上一首/下一首（87/88）。电源键永远不会被接管。
+- **单击像手指拖动的遥控器**：有些遥控器（以及相机式遥控器的环形键）短按不发键码，而是发一条短指针拖动。Kamare 阅读页注册了全屏 swipe：左右滑翻页；单页/双页模式下**下滑合页**、上滑上一页。方向反了就在蓝牙 tab 里把 **滑动翻页方向** 改成「反向」。
+- **诊断**：蓝牙 tab → **翻页器工具**：
+  - 立即重新扫描；
+  - 按键嗅探（30 秒）——临时打开所有输入节点，找出「按了但没反应」的键；
+  - 保存诊断到 `koreader/kamare-pager.log`；
+  - 打开实时诊断页：状态、后端、当前绑定、最近按键、最近 swipe，以及每个输入节点声明的全部键码。
+- **连接不是 Kamare 的事**：Kindle 上用 [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough) 把 BLE 遥控器变成虚拟键盘（如果已安装但没运行，Kamare 会尝试启动它）；Kobo 用系统蓝牙配对，Kamare 接管 `uhid` 节点（Kobo 路径尚未在真机上完整验证）。
+- **与 `pageturner.koplugin` 共存**：两者可以同时安装；谁先拿到设备，只有真正绑定按键的插件会吞键；Kamare 也会处理 pageturner 广播的 `GotoViewRel`，不会翻两次。
+- **不覆盖**：KOReader 原生 EPUB/PDF 阅读器，以及按住连续滚动。
+
+## 设置
+
+阅读时点屏幕下方打开阅读设置，5 个 tab：
+
+| Tab | 内容 |
+| --- | --- |
+| **阅读** | 视图模式、翻页方向、宽页、分割方向、裁切边框、页脚、章节结束 |
+| **版面** | 适应、左右边距、上边距、下边距、页面间距、双页间距、滚动距离、背景颜色 |
+| **操作** | 放大范围、放大倍数、长按放大、合页方向、下滑合页 |
+| **蓝牙** | 翻页器工具、滑动翻页方向、翻页器按键、启用翻页器 |
+| **设置** | 预取、渲染质量、对比度、色彩增强、屏幕旋转、前光 |
+
+- **每系列记忆**：改过一次设置后，再打开这个系列的任何章节都会恢复该系列的配置；没改过的系列继续跟随全局默认。每系列的值保存在 `settings/kamare_books.lua`，删掉对应条目或整个文件即可回到全局默认。
+- **顶部 8% 长按**：直接打开蓝牙 tab，不依赖 Kamare 书库，在月读里打开的书也能用。
+
+<details>
+<summary><b>查看全部设置页截图</b></summary>
+
+<table>
+<tr>
+<td align="center" valign="top"><img src="doc/settings-reading.png" alt="阅读设置" width="220"><br><b>阅读</b></td>
+<td align="center" valign="top"><img src="doc/settings-layout.png" alt="版面设置" width="220"><br><b>版面</b></td>
+<td align="center" valign="top"><img src="doc/settings-interaction.png" alt="操作设置" width="220"><br><b>操作</b></td>
+</tr>
+<tr>
+<td align="center" valign="top"><img src="doc/settings-pager.png" alt="蓝牙设置" width="220"><br><b>蓝牙</b></td>
+<td align="center" valign="top"><img src="doc/settings-rendering.png" alt="渲染设置" width="220"><br><b>设置</b></td>
+<td align="center" valign="top"><img src="doc/pager-tools.png" alt="翻页器工具" width="220"><br><b>翻页器工具</b></td>
+</tr>
+</table>
+
+</details>
+
+## 最近更新
+
+### 0.10.11
+
+- **下滑临时合页**：单页模式下向下滑，把本页和下一页合在一起；再下滑退出，翻下一页自动跳过（5+6 → 7）。Split 横页合回整张物理页，两半按裁切后内容紧贴。
+- **合页方向**：自动 / 左至右 / 右至左；日漫可以显示为左 6、右 5。Split 两半不受影响。
+- **设置菜单重排为 5 个 tab**：阅读 / 版面 / 操作 / 蓝牙 / 设置。
+- **蓝牙诊断动作**收进「翻页器工具」对话框。
+
+### 0.10.10
+
+- **翻页器设置并入阅读菜单**：蓝牙 tab，含启停、按键绑定、滑动方向、诊断、嗅探、重扫；长按顶部 8% 直接打开这个 tab。
+
+### 0.10.9
+
+- **双页扫描按真实书缝切分**：宽页四边内容顶满、找不到可裁外边框时，仍会从主色推断纸色并找到中间书缝，两半不再各留半条白边；不对称跨页也覆盖。
+
+### 0.10.8
+
+- **放大镜范围与倍数可调**：范围 10–70%（默认 25%），倍数 1.25–2.5x（默认 2x）。
+
+### 0.10.7
+
+- **长按放大镜**：按住页面任意位置出现跟手放大窗口，松手还原；可在阅读设置里开关。
+
+### 0.10
+
+- **离线缓存**：整章下载、断点续传、串行队列、离线书架、阅读日志、缓存管理、稳定 serverKey。
+- **公开缓存 API**：`require("kamarecache")` 暴露 `API_VERSION = 1` 和 `capabilities`，月读（Moon）的 Kavita 源可以直接下载/检查/打开缓存章节。
+
+## 开发与测试
 
 ```sh
-./spec/run.sh            # all specs
-./spec/run.sh queue      # one file (substring match)
+./spec/run.sh            # 跑全部测试
+./spec/run.sh queue      # 只跑文件名包含 queue 的测试
 ```
 
-The runner boots a KOReader emulator LuaJIT runtime (`v2026.07.2-207`) with the
-real `rapidjson`, `libarchive` and `lfs` modules. It needs no network: the only
-socket traffic is a loopback fixture. If the default runtime path does not
-exist, point `KOREADER_DIR` at a KOReader tree that contains `luajit` and
-`common/`:
+测试跑在 KOReader 模拟器的 LuaJIT 运行时（`v2026.07.2-207`）里，使用真实的 `rapidjson`、`libarchive` 和 `lfs`，不需要网络。默认运行时路径不存在时，用 `KOREADER_DIR` 指向包含 `luajit` 和 `common/` 的 KOReader 目录：
 
 ```sh
 KOREADER_DIR=/path/to/koreader ./spec/run.sh
 ```
 
-## Configuration
-
-Access settings while reading by tapping the screen. Customize your experience:
-
-- **View Modes**: Switch between scroll, page, and dual-page modes
-- **Page Direction**: LTR or RTL
-- **Prefetching**: Prefetch next pages for smooth reading
-- **Render Quality**: Balance between quality and speed (also helps with older devices, or crazy files)
-
-Settings are remembered **per series**: once you change something while reading a
-series, opening any chapter of it again restores that configuration. Series you
-never customized keep following the global defaults. Per-series values are
-stored in `settings/kamare_books.lua` (delete an entry, or the whole file, to
-fall back to the global defaults).
+发布工作流会把 tag 版本注入 `kamareversion.lua`；普通 checkout 会显示 `0.10.11-dev`。
 
 <details>
-<summary><b>View all settings</b></summary>
+<summary><b>缓存 API 与插件接口</b></summary>
 
-<table>
-<tr>
-<td align="center" valign="top">
-<img src="doc/settings-general.png" alt="General settings">
-<br><b>General</b>
-</td>
-<td align="center" valign="top">
-<img src="doc/settings-page.png" alt="Page settings">
-<br><b>Page</b>
-</td>
-<td align="center" valign="top">
-<img src="doc/settings-zoom.png" alt="Zoom settings">
-<br><b>Zoom</b>
-</td>
-</tr>
-</table>
+- **缓存 API**：`require("kamarecache")`，`API_VERSION = 1`，`capabilities = { status, summary, enqueue, delete, server, resume, queue, queue_control, index, open, estimate, chapters, delete_all }`。调用方用 `pcall(require, "kamarecache")` 探测；缺模块、major 不匹配或缺某个能力时静默降级。
+- **失败约定**：`nil, code, message`，`code` 是 snake_case（`unknown_server`、`offline_not_cached`、`viewer_running`、`chapter_open`、`not_enough_space` 等）。
+- **翻页器 API**：`require("kamarepager")` 暴露 `api_version`、`capabilities`、`status()`、`on()` / `off()`、`bindings()`。
+- **功能清单**：`kamarefeatures.lua` 列出月读缓存页展示的功能；ID 由 Kamare 自己解释，`api_version` 只在清单结构变化时递增。
 
 </details>
+
+## 已知限制
+
+- 只处理 Kamare 自己的漫画阅读页，不处理 KOReader 原生的 EPUB/PDF 阅读器。
+- 合页只在单页模式生效；双页模式、连续滚动不支持。整张横图、长条页、最后一页会拒绝合页。
+- 蓝牙翻页器的 Kobo 路径尚未在真机上完整验证。
+- Android 上部分媒体键会被系统桥接层拦截；需要在绑定期间由 Kamare 接管（见上文）。
+
+## 许可
+
+本项目使用 [GNU Affero General Public License v3.0](LICENSE)。原项目由 [Fabian Pammer](https://github.com/fpammer) 创建。
