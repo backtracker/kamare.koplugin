@@ -1282,3 +1282,39 @@ msgstr "手指周围被放大的页面范围，占屏幕短边的比例。放大
 
 msgid "How much the captured area is enlarged. A higher value makes the window bigger as well, so the same area is shown with bigger text."
 msgstr "这块范围被放大的倍数。倍数越高，窗口也越大，同样的范围显示成更大的字。"
+
+msgid "Inverted"
+msgstr "反向"
+
+msgid "Normal"
+msgstr "正常"
+
+msgid "Rescan"
+msgstr "重新扫描"
+
+msgid "Start"
+msgstr "开始"
+
+msgid "Swipe Page Turn"
+msgstr "滑动翻页方向"
+
+msgid "Look for the page-turner again after reconnecting it."
+msgstr "重新连接翻页器后，用它再扫描一次。"
+
+msgid "Watch every input device for 30 seconds, then open the diagnostics page."
+msgstr "监听所有输入设备 30 秒，然后打开诊断页。"
+
+msgid "Show the live status, bound keys, and the last key received."
+msgstr "显示实时状态、已绑定的按键和最近收到的按键。"
+
+msgid "Invert left/right page turns when a remote's arrow keys turn pages the opposite way."
+msgstr "遥控器方向键的翻页方向相反时，把左右翻页反过来。"
+
+msgid "Choose which buttons turn pages. Add a key by pressing it."
+msgstr "选择用哪些按键翻页。按下按键即可添加。"
+
+msgid "Take over the Bluetooth page-turner. Turn it off here to release the device."
+msgstr "接管蓝牙翻页器。关闭后会释放设备。"
+
+msgid "Write the current status and recent keys to koreader/kamare-pager.log."
+msgstr "把当前状态和最近的按键写入 koreader/kamare-pager.log。"

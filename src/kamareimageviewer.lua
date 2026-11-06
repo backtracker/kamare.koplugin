@@ -1191,66 +1191,62 @@ function KamareImageViewer:onTapMenu()
     return true
 end
 
---- 阅读页里的翻页器菜单（长按顶部 8% 打开）。
+--- 阅读页里的翻页器入口（长按顶部 8% 打开）。
+--- 已经合并到下方阅读设置：直接跳到第 3 个 tab（设置前一个），不另开一份菜单。
 --- 不依赖 kamare 书库，所以在月读里打开的书也能用。
 function KamareImageViewer:onPagerMenu()
-    local dialog
-    local function close() UIManager:close(dialog) end
-    dialog = ButtonDialog:new{
-        title = _("Pager"),
-        buttons = {
-            {{
-                text = _("Pager keys"),
-                callback = function()
-                    close()
-                    Pager.show_bindings()
-                end,
-            }},
-            {{
-                text = _("Pager diagnostics"),
-                callback = function()
-                    close()
-                    Pager.show_diagnostics()
-                end,
-            }},
-            {{
-                text = _("Sniff pager keys (30s)"),
-                callback = function()
-                    close()
-                    Pager.sniff_for(30)
-                end,
-            }},
-            {{
-                -- 遥控器的「右」键让指针向右滑，和触屏「左滑 = 下一页」相反。
-                -- 方向反了不用等新包，这里当场翻过来。
-                text = Pager.swipe_flipped()
-                    and _("Swipe page turn: inverted (tap to restore)")
-                    or _("Swipe page turn: normal (tap to invert)"),
-                callback = function()
-                    local flipped = Pager.toggle_swipe_flipped()
-                    close()
-                    UIManager:show(InfoMessage:new{
-                        text = flipped
-                            and _("Swipe right = next page, swipe left = previous page.")
-                            or _("Swipe left = next page, swipe right = previous page."),
-                        timeout = 2,
-                    })
-                end,
-            }},
-            {{
-                text = _("Save pager diagnostics to file"),
-                callback = function()
-                    close()
-                    local path, err = Pager.save_diagnostics()
-                    UIManager:show(InfoMessage:new{
-                        text = path and (_("Saved to") .. ":\n" .. tostring(path))
-                            or (_("Save failed") .. ": " .. tostring(err)),
-                    })
-                end,
-            }},
-        },
-    }
-    UIManager:show(dialog)
+    return self:onShowConfigMenu(self.options.pager_panel or 1)
+end
+
+-- Pager settings tab (KamareOptions.pager_panel) ----------------------------
+-- The rows are declared in kamareoptions.lua; ConfigDialog dispatches their
+-- events here. Pager state is the source of truth, so these handlers do not
+-- write configurable fields (that would duplicate G_reader_settings and pin
+-- the values into per-series book settings).
+
+function KamareImageViewer:onSetPagerEnabled(enabled)
+    Pager.set_enabled(tonumber(enabled) == 1)
+    return true
+end
+
+function KamareImageViewer:onShowPagerKeys()
+    Pager.show_bindings()
+    return true
+end
+
+function KamareImageViewer:onSetPagerSwipeInverted(inverted)
+    Pager.set_swipe_flipped(tonumber(inverted) == 1)
+    return true
+end
+
+function KamareImageViewer:onShowPagerDiagnostics()
+    Pager.show_diagnostics()
+    return true
+end
+
+function KamareImageViewer:onSniffPagerKeys()
+    local ok, err = Pager.sniff_for(30)
+    if not ok then
+        UIManager:show(InfoMessage:new{
+            text = _("Sniff unavailable") .. ": " .. tostring(err),
+            timeout = 4,
+        })
+    end
+    return true
+end
+
+function KamareImageViewer:onSavePagerDiagnostics()
+    local path, err = Pager.save_diagnostics()
+    UIManager:show(InfoMessage:new{
+        text = path and (_("Saved to") .. ":\n" .. tostring(path))
+            or (_("Save failed") .. ": " .. tostring(err)),
+    })
+    return true
+end
+
+function KamareImageViewer:onRescanPager()
+    Pager.rescan()
+    UIManager:show(InfoMessage:new{ text = Pager.describe(), timeout = 3 })
     return true
 end
 
@@ -1341,7 +1337,7 @@ function KamareImageViewer:onTapBackward()
     return true
 end
 
-function KamareImageViewer:onShowConfigMenu()
+function KamareImageViewer:onShowConfigMenu(panel_index)
     self.configurable.footer_mode  = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
     self.configurable.view_mode  = self.view_mode
@@ -1373,7 +1369,7 @@ function KamareImageViewer:onShowConfigMenu()
         close_callback = function() self:onConfigCloseCallback() end,
     }
 
-    self.config_dialog:onShowConfigPanel(1)
+    self.config_dialog:onShowConfigPanel(panel_index or 1)
     UIManager:show(self.config_dialog)
     return true
 end

@@ -18,6 +18,14 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
 
+## What's new in 0.10.10
+
+- **Pager settings in the reader menu.** The Bluetooth page-turner now has its
+  own tab in the bottom reader config menu (Bluetooth icon, right before
+  Settings): enable/disable, key bindings, swipe direction, diagnostics, key
+  sniffing, and rescanning. Long-pressing the top 8% of a page opens that tab
+  directly, so the old standalone pager dialog is gone.
+
 ## What's new in 0.10.9
 
 - **Wide-page split is flush again.** Two-page scans whose artwork reaches all

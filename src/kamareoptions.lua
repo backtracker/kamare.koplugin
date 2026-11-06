@@ -3,6 +3,27 @@ local Device = require("device")
 local _ = require("gettext")
 local C_ = _.pgettext
 
+-- ConfigDialog asks IconWidget for tab icons by bare name and IconWidget only
+-- looks inside KOReader's own icon dirs. A plugin-owned icon is addressed by
+-- walking up to the filesystem root and back down the absolute path: "/.."
+-- stays "/", so this resolves no matter which directory KOReader was launched
+-- from. The icon is shipped in <plugin>/icons/.
+local function plugin_icon(name)
+    local source = debug.getinfo(1, "S").source
+    local dir = source and source:match("^@(.+)[/\\][^/\\]+$")
+    if dir and dir:sub(1, 1) == "/" then
+        local icon = string.rep("../", 32) .. dir:gsub("^/+", "") .. "/icons/" .. name
+        -- Verify with the same relative lookup IconWidget will do, so a
+        -- launcher with an unexpected cwd gets a working icon instead of the
+        -- "icon not found" fallback.
+        local lfs = require("libs/libkoreader-lfs")
+        if lfs.attributes("resources/icons/mdlight/" .. icon .. ".svg", "mode") == "file" then
+            return icon
+        end
+    end
+    return "appbar.settings"
+end
+
 local KamareOptions = {
     prefix = "kamare",
     {
@@ -277,6 +298,83 @@ local KamareOptions = {
         }
     },
     {
+        -- Pager (Bluetooth page-turner) settings. Previously these lived in a
+        -- separate long-press menu at the top of the page; the long-press now
+        -- opens this tab, so there is one place for all of them. Rows are
+        -- ordered least-used first because the dialog is bottom-anchored and
+        -- may clip the rows at the top on short screens.
+        icon = plugin_icon("bluetooth"),
+        options = {
+            {
+                name = "pager_rescan",
+                name_text = _("Rescan now"),
+                toggle = {_("Rescan")},
+                values = {0},
+                event = "RescanPager",
+                help_text = _([[Look for the page-turner again after reconnecting it.]]),
+            },
+            {
+                name = "pager_save_diagnostics",
+                name_text = _("Save pager diagnostics to file"),
+                toggle = {_("Save")},
+                values = {0},
+                event = "SavePagerDiagnostics",
+                help_text = _([[Write the current status and recent keys to koreader/kamare-pager.log.]]),
+            },
+            {
+                name = "pager_sniff",
+                name_text = _("Sniff pager keys (30s)"),
+                toggle = {_("Start")},
+                values = {0},
+                event = "SniffPagerKeys",
+                help_text = _([[Watch every input device for 30 seconds, then open the diagnostics page.]]),
+            },
+            {
+                name = "pager_diagnostics",
+                name_text = _("Pager diagnostics"),
+                toggle = {_("Open")},
+                values = {0},
+                event = "ShowPagerDiagnostics",
+                help_text = _([[Show the live status, bound keys, and the last key received.]]),
+            },
+            {
+                -- Keep the two real settings below the action rows, where they
+                -- are always visible on short screens.
+                name = "pager_swipe_inverted",
+                name_text = _("Swipe Page Turn"),
+                toggle = {_("Normal"), _("Inverted")},
+                values = {0, 1},
+                current_func = function()
+                    return require("kamarepager").swipe_flipped() and 1 or 0
+                end,
+                event = "SetPagerSwipeInverted",
+                args = {0, 1},
+                help_text = _([[Invert left/right page turns when a remote's arrow keys turn pages the opposite way.]]),
+            },
+            {
+                name = "pager_keys",
+                name_text = _("Pager keys"),
+                toggle = {_("Edit")},
+                values = {0},
+                event = "ShowPagerKeys",
+                help_text = _([[Choose which buttons turn pages. Add a key by pressing it.]])
+                    .. "\n" .. _([[Set up by pressing twice (next page, then previous)]]),
+            },
+            {
+                name = "pager_enabled",
+                name_text = _("Enable pager"),
+                toggle = {_("off"), _("on")},
+                values = {0, 1},
+                current_func = function()
+                    return require("kamarepager").is_enabled() and 1 or 0
+                end,
+                event = "SetPagerEnabled",
+                args = {0, 1},
+                help_text = _([[Take over the Bluetooth page-turner. Turn it off here to release the device.]]),
+            }
+        }
+    },
+    {
         icon = "appbar.settings",
         options = {
             {
@@ -375,7 +473,9 @@ local KamareOptions = {
                 enabled_func = function() return Device:hasFrontlight() end,
             }
         }
-    }
+    },
+    -- Lets the viewer jump straight to the pager tab (top-8% long-press).
+    pager_panel = 3,
 }
 
 return KamareOptions

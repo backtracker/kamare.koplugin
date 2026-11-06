@@ -1934,9 +1934,10 @@ function KavitaBrowser:showTitleMenu()
         align = "left",
     }})
 
-    -- Read-only pager status + a live key test. The only knob (enable/disable)
-    -- lives in Moon's settings page; duplicating it here would create a second
-    -- source of truth.
+    -- Read-only pager status + a live key test. The settings themselves
+    -- (enable/disable, bindings, diagnostics) live in the reader config menu
+    -- and Moon's settings page; duplicating the toggle here would create a
+    -- second source of truth.
     table.insert(buttons, {{
         text = _("Pager keys"),
         callback = function()
