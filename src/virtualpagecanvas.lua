@@ -69,6 +69,9 @@ local VirtualPageCanvas = Widget:extend{
     -- paints this pair instead of the normal single/dual/scroll view. Purely
     -- transient: no settings, no view_mode change.
     temp_join = nil,
+    -- Display order of an independent pair: 0 = Auto (page_direction),
+    -- 1 = LTR, 2 = RTL. Split halves ignore this (physical order wins).
+    join_direction = 0,
     -- Magnification relative to the page's current display zoom; owned by the
     -- viewer's reader-config option.
     magnifier_zoom = Magnifier.MAGNIFY_FACTOR,
@@ -673,7 +676,8 @@ function VirtualPageCanvas:paintPairJoin(target, x, y, plan)
     local viewport_w, viewport_h = self:getViewportSize()
     if viewport_w <= 0 or viewport_h <= 0 then return end
 
-    local left_page, right_page = PageJoin.pair_pages(plan, self.page_direction)
+    local left_page, right_page = PageJoin.pair_pages(plan,
+        PageJoin.resolve_direction(self.page_direction, self.join_direction))
     local gap = self.dual_page_gap or 0
     local page_width = math.floor((viewport_w - gap) / 2)
     local zoom = self:_computeZoomForDualPage(left_page, right_page, page_width, viewport_h)

@@ -127,6 +127,9 @@ local KamareImageViewer = InputContainer:extend{
     long_press_magnifier = 1, -- 0 = off, 1 = on
     -- Swipe down in page mode to join the current page with the next one.
     swipe_down_join = 1, -- 0 = off, 1 = on
+    -- Display order of a joined pair: 0 = Auto (Page Direction), 1 = LTR,
+    -- 2 = RTL. Split halves always keep their physical order.
+    join_direction = 0,
     -- Loupe magnification relative to the page's current display zoom.
     magnifier_zoom = 2.0,
     -- Loupe window size as a fraction of the screen's short side.
@@ -480,6 +483,7 @@ function KamareImageViewer:_initCanvas()
         h_margin = self.h_margin,
         top_margin = self.top_margin,
         bottom_margin = self.bottom_margin,
+        join_direction = self.join_direction,
         dual_page_gap = self.dual_page_gap,
         background = bg_color,
         view_mode = self.view_mode,
@@ -694,6 +698,7 @@ function KamareImageViewer:loadSettings()
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.swipe_down_join = self.swipe_down_join
+    self.configurable.join_direction = self.join_direction
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -728,6 +733,7 @@ function KamareImageViewer:loadSettings()
         or self.configurable.crop_borders == "1"
     self.long_press_magnifier = tonumber(self.configurable.long_press_magnifier) or 1
     self.swipe_down_join = tonumber(self.configurable.swipe_down_join) or 1
+    self.join_direction = tonumber(self.configurable.join_direction) or 0
     self.magnifier_zoom = Math.clamp(tonumber(self.configurable.magnifier_zoom) or 2.0, 1.25, 2.5)
     local size_percent = tonumber(self.configurable.magnifier_scope) or 25
     if size_percent <= 1 then size_percent = size_percent * 100 end
@@ -765,6 +771,7 @@ function KamareImageViewer:syncAndSaveSettings()
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.swipe_down_join = self.swipe_down_join
+    self.configurable.join_direction = self.join_direction
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -1387,6 +1394,7 @@ function KamareImageViewer:onShowConfigMenu(panel_index)
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
     self.configurable.swipe_down_join = self.swipe_down_join
+    self.configurable.join_direction = self.join_direction
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -1999,6 +2007,18 @@ function KamareImageViewer:onSetSwipeDownJoin(value)
         self:_clearTempJoinState()
         self:updateImageOnly()
     end
+    self:syncAndSaveSettings()
+    return true
+end
+
+function KamareImageViewer:onSetJoinDirection(value)
+    local direction = Math.clamp(tonumber(value) or 0, 0, 2)
+    if direction == self.join_direction then return true end
+
+    self.join_direction = direction
+    self.configurable.join_direction = direction
+    if self.canvas then self.canvas.join_direction = direction end
+    if self._temp_join then self:updateImageOnly() end
     self:syncAndSaveSettings()
     return true
 end

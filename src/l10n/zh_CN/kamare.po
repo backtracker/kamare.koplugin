@@ -1330,3 +1330,9 @@ msgstr "翻页器工具"
 
 msgid "Rescan the page-turner, sniff keys, save diagnostics, or open the live status page."
 msgstr "重新扫描翻页器、嗅探按键、保存诊断，或打开实时状态页。"
+
+msgid "Join Direction"
+msgstr "合页方向"
+
+msgid "Left/right order of the two pages in a join. Auto follows Page Direction; LTR puts the earlier page on the left; RTL puts it on the right (Japanese manga). Split halves always keep their physical order."
+msgstr "合页时两张页面的左右顺序。「自动」跟随「翻页方向」；「左至右」较早的页在左；「右至左」较早的页在右（日漫）。一张横页拆开的两半始终按物理左右摆放。"

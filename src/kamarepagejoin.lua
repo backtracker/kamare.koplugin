@@ -119,6 +119,15 @@ function PageJoin.pair_pages(plan, page_direction)
     return plan.first, plan.second
 end
 
+--- Resolve the join display direction.
+--- join_direction: 0 = Auto (follow Page Direction), 1 = LTR, 2 = RTL.
+--- Returns 0 (LTR) or 1 (RTL), the shape pair_pages expects.
+function PageJoin.resolve_direction(page_direction, join_direction)
+    if join_direction == 1 then return 0 end
+    if join_direction == 2 then return 1 end
+    return page_direction == 1 and 1 or 0
+end
+
 --- Numeric exit targets. Deliberately independent of page_direction.
 function PageJoin.next_target(plan)
     return plan and plan.second + 1 or nil

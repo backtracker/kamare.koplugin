@@ -68,7 +68,7 @@ return function(t)
         "zoom_mode_type,h_margin,top_margin,bottom_margin,page_gap_height,dual_page_gap,scroll_distance,background_color",
         "IA2: layout tab holds fit, margins, gaps and appearance")
     t.eq(names(options[3]),
-        "magnifier_scope,magnifier_zoom,long_press_magnifier,swipe_down_join",
+        "magnifier_scope,magnifier_zoom,long_press_magnifier,join_direction,swipe_down_join",
         "IA2: interaction tab holds magnifier and join")
     t.eq(names(options[4]),
         "pager_tools,pager_swipe_inverted,pager_keys,pager_enabled",
@@ -108,6 +108,25 @@ return function(t)
     local tools = row(options[4], "pager_tools")
     t.ok(tools ~= nil, "IA5: pager tools row exists")
     t.eq(tools and tools.event, "ShowPagerTools", "IA5: pager tools dispatches ShowPagerTools")
+
+    ----------------------------------------------------------------
+    -- Join direction
+    ----------------------------------------------------------------
+    local direction = row(options[3], "join_direction")
+    t.ok(direction ~= nil, "IA6: the join direction row exists")
+    if direction then
+        t.eq(direction.default_value, 0, "IA6: auto by default")
+        t.eq(direction.event, "SetJoinDirection", "IA6: dispatches SetJoinDirection")
+        t.eq(direction.values[1], 0, "IA6: auto maps to 0")
+        t.eq(direction.values[2], 1, "IA6: LTR maps to 1")
+        t.eq(direction.values[3], 2, "IA6: RTL maps to 2")
+        t.ok(direction.enabled_func({ view_mode = 0, swipe_down_join = 1 }) == true,
+            "IA6: enabled when the join is on in page mode")
+        t.ok(direction.enabled_func({ view_mode = 0, swipe_down_join = 0 }) == false,
+            "IA6: disabled when the join is off")
+        t.ok(direction.enabled_func({ view_mode = 1, swipe_down_join = 1 }) == false,
+            "IA6: disabled outside page mode")
+    end
 
     restore()
 end

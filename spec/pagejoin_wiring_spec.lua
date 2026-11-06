@@ -29,6 +29,14 @@ return function(t)
         "JW1: the reader menu exposes the switch")
     t.ok(options:find('event = "SetSwipeDownJoin"', 1, true) ~= nil,
         "JW1: the row dispatches SetSwipeDownJoin")
+    t.ok(options:find('name = "join_direction"', 1, true) ~= nil,
+        "JW1: the reader menu exposes the join direction")
+    t.ok(options:find('event = "SetJoinDirection"', 1, true) ~= nil,
+        "JW1: the direction row dispatches SetJoinDirection")
+    t.ok(viewer:find("function KamareImageViewer:onSetJoinDirection", 1, true) ~= nil,
+        "JW1: the direction has a handler")
+    t.ok(canvas:find("PageJoin.resolve_direction", 1, true) ~= nil,
+        "JW1: the canvas resolves the join direction")
     t.ok(options:find('icon = "appbar.tools"', 1, true) ~= nil,
         "JW1: the interaction tab exists")
     t.ok(viewer:find("function KamareImageViewer:enterTempJoin", 1, true) ~= nil,

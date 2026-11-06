@@ -32,6 +32,8 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
   **Interaction** tab (`Swipe down to join pages`, on by default); that update
   also regroups the menu into Reading / Layout / Interaction / Pager / Settings
   and moves the pager diagnostics actions behind a `Pager tools` dialog.
+  `Join Direction` (Auto / LTR / RTL) sets the left/right order independently
+  of Page Direction; split halves always keep their physical order.
 
 ## What's new in 0.10.10
 

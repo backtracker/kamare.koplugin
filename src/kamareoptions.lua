@@ -325,6 +325,20 @@ local KamareOptions = {
                 help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
             },
             {
+                name = "join_direction",
+                name_text = _("Join Direction"),
+                toggle = {_("Auto"), _("LTR"), _("RTL")},
+                values = {0, 1, 2},
+                default_value = 0,
+                event = "SetJoinDirection",
+                args = {0, 1, 2},
+                enabled_func = function(configurable)
+                    return (tonumber(configurable.swipe_down_join) or 1) == 1
+                        and (configurable.view_mode or 0) == 0
+                end,
+                help_text = _([[Left/right order of the two pages in a join. Auto follows Page Direction; LTR puts the earlier page on the left; RTL puts it on the right (Japanese manga). Split halves always keep their physical order.]]),
+            },
+            {
                 name = "swipe_down_join",
                 name_text = _("Swipe down to join pages"),
                 toggle = {_("off"), _("on")},

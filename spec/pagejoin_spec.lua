@@ -166,4 +166,14 @@ return function(t)
     local nh, nh_reason = PageJoin.plan(next_half, 1)
     t.eq(nh, nil, "J16: a half next page is rejected")
     t.eq(nh_reason, "next-half", "J16: reason names the half next page")
+
+    ----------------------------------------------------------------
+    -- Join direction: Auto follows Page Direction; LTR/RTL override it
+    ----------------------------------------------------------------
+    t.eq(PageJoin.resolve_direction(0, 0), 0, "J17: auto + LTR page = LTR join")
+    t.eq(PageJoin.resolve_direction(1, 0), 1, "J17: auto + RTL page = RTL join")
+    t.eq(PageJoin.resolve_direction(1, 1), 0, "J18: forced LTR beats an RTL page")
+    t.eq(PageJoin.resolve_direction(0, 2), 1, "J18: forced RTL beats an LTR page")
+    t.eq(PageJoin.resolve_direction(0, 1), 0, "J18: forced LTR on an LTR page")
+    t.eq(PageJoin.resolve_direction(1, 2), 1, "J18: forced RTL on an RTL page")
 end
