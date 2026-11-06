@@ -14,9 +14,21 @@ featuring a custom renderer that also supports long-strip formats commonly used 
 - **Progress Tracking** - Syncs with Kavita and KOReader reading stats
 - **Optimized Renderer** - Custom-built for fluid manga reading experience
 - **Long-press Magnifier** - Hold a page to zoom a local area under your finger; configurable in reader settings
+- **Temporary Page Join** - Swipe down in page mode to show the current page and the next one as one spread; the next page turn leaves it
 - **Offline Cache** - Download whole chapters, read them with no connection, sync progress on reconnect
 
 Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
+
+## What's new in 0.10.11
+
+- **Temporary page join (合页).** Swipe down in single-page mode to show the
+  current page and the next one together; swipe down again to leave. For a
+  split wide page, either half joins both halves of the same physical page,
+  with the cropped gutter removed; for two normal pages the reading direction
+  only decides which one is on the left. The join is one-shot: the next page
+  turn skips the pair (5+6 -> 7). Wide pages (already a spread), strip pages,
+  and the last page are left alone. Nothing is written to settings and
+  `view_mode` is not changed.
 
 ## What's new in 0.10.10
 

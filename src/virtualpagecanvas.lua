@@ -25,6 +25,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local logger = require("logger")
 local Math = require("optmath")
 local Magnifier = require("kamaremagnifier")
+local PageJoin = require("kamarepagejoin")
 local time = require("ui/time")
 local Font = require("ui/font")
 local TextWidget = require("ui/widget/textwidget")
@@ -63,6 +64,11 @@ local VirtualPageCanvas = Widget:extend{
     -- the last dirty rect, so moving it repaints both the old and new spot.
     _loupe = nil,
     _loupe_region = nil,
+
+    -- Temporary manual page-join plan (kamarepagejoin). While set, the canvas
+    -- paints this pair instead of the normal single/dual/scroll view. Purely
+    -- transient: no settings, no view_mode change.
+    temp_join = nil,
     -- Magnification relative to the page's current display zoom; owned by the
     -- viewer's reader-config option.
     magnifier_zoom = Magnifier.MAGNIFY_FACTOR,
@@ -134,6 +140,21 @@ function VirtualPageCanvas:setPage(page)
         self._layout_dirty = true
         self:markDirty()
     end
+end
+
+--- Enter (or replace) the temporary manual page-join view.
+--- `plan` comes from kamarepagejoin.plan(); nil clears it.
+function VirtualPageCanvas:setTempJoin(plan)
+    if self.temp_join == plan then return end
+    self.temp_join = plan
+    self:markDirty()
+end
+
+--- Leave the temporary page-join view. The caller repaints the normal page.
+function VirtualPageCanvas:clearTempJoin()
+    if not self.temp_join then return end
+    self.temp_join = nil
+    self:markDirty()
 end
 
 function VirtualPageCanvas:setZoom(zoom)
@@ -500,7 +521,9 @@ function VirtualPageCanvas:_paintToImpl(target, x, y)
         return
     end
 
-    if self.view_mode == 2 then
+    if self.temp_join then
+        self:paintTempJoin(target, x, y)
+    elseif self.view_mode == 2 then
         self:paintDualPage(target, x, y)
     elseif self.view_mode == 1 then
         self:paintScroll(target, x, y)
@@ -508,7 +531,7 @@ function VirtualPageCanvas:_paintToImpl(target, x, y)
         self:paintSinglePage(target, x, y)
     end
 
-    if self._loupe then
+    if self._loupe and not self.temp_join then
         self:paintLoupe(target, x, y)
     end
 end
@@ -588,6 +611,86 @@ function VirtualPageCanvas:paintSinglePage(target, x, y)
     elseif r == "pending" then
         self:_paintPlaceholder(target, dest_x, dest_y, view_w, view_h)
         if self.on_pending_page then self.on_pending_page(page) end
+    end
+end
+
+function VirtualPageCanvas:paintTempJoin(target, x, y)
+    local plan = self.temp_join
+    if not plan then return end
+    if plan.kind == "split" then
+        self:paintSplitJoin(target, x, y, plan)
+    else
+        self:paintPairJoin(target, x, y, plan)
+    end
+end
+
+-- Draw one page of a join at an explicit destination. `dims` is the page's
+-- cropped native size; the tile render dims match the single-page path so the
+-- existing half tiles are reused.
+function VirtualPageCanvas:_paintJoinPage(target, page, dims, dest_x, dest_y, zoom)
+    if not (self.document and dims and dims.w > 0 and dims.h > 0) then return end
+
+    local rect = Geom:new{ x = 0, y = 0, w = dims.w, h = dims.h }
+    local render_w, render_h = self:_renderDimsFor(dims.w, dims.h)
+    local ok_draw, r = pcall(function()
+        return self.document:drawPageTiled(target, dest_x, dest_y, rect, page, zoom,
+                                           nil, 0, true, render_w, render_h, self.render_quality)
+    end)
+    if not ok_draw then
+        logger.warn("VPC:paintJoinPage tiled render failed")
+    elseif r == "pending" then
+        self:_paintPlaceholder(target, dest_x, dest_y, dims.w * zoom, dims.h * zoom)
+        if self.on_pending_page then self.on_pending_page(page) end
+    end
+end
+
+-- Two halves of one physical page: shared zoom, drawn tight (the gutter was
+-- removed by Split and must not come back). Physical left stays left,
+-- regardless of reading direction.
+function VirtualPageCanvas:paintSplitJoin(target, x, y, plan)
+    if not self.document then return end
+    local left_dims = self.document:getNativePageDimensions(plan.left)
+    local right_dims = self.document:getNativePageDimensions(plan.right)
+    local viewport_w, viewport_h = self:getViewportSize()
+    local layout = PageJoin.split_layout(viewport_w, viewport_h, left_dims, right_dims)
+    if not layout then return end
+
+    local zoom = layout.zoom
+    local left_x = x + self.h_margin + math.floor((viewport_w - layout.total_w) / 2)
+    local left_y = y + self.top_margin + math.floor((viewport_h - left_dims.h * zoom) / 2)
+    -- One pixel of overlap hides the rounding seam between the two blits.
+    local right_x = left_x + math.floor(left_dims.w * zoom) - 1
+    local right_y = y + self.top_margin + math.floor((viewport_h - right_dims.h * zoom) / 2)
+
+    self:_paintJoinPage(target, plan.left, left_dims, left_x, left_y, zoom)
+    self:_paintJoinPage(target, plan.right, right_dims, right_x, right_y, zoom)
+end
+
+-- Two independent portrait pages: reuse the dual-page geometry (half-width
+-- slots + dual_page_gap), with reading direction choosing the side order.
+function VirtualPageCanvas:paintPairJoin(target, x, y, plan)
+    if not self.document then return end
+    local viewport_w, viewport_h = self:getViewportSize()
+    if viewport_w <= 0 or viewport_h <= 0 then return end
+
+    local left_page, right_page = PageJoin.pair_pages(plan, self.page_direction)
+    local gap = self.dual_page_gap or 0
+    local page_width = math.floor((viewport_w - gap) / 2)
+    local zoom = self:_computeZoomForDualPage(left_page, right_page, page_width, viewport_h)
+    if zoom <= 0 then zoom = 1.0 end
+
+    local left_rect = self:_getDualPageRect(left_page, zoom, "left", page_width, viewport_h)
+    if left_rect then
+        self:_paintJoinPage(target, left_page,
+            self.document:getNativePageDimensions(left_page),
+            x + math.floor(left_rect.x), y + math.floor(left_rect.y), zoom)
+    end
+
+    local right_rect = self:_getDualPageRect(right_page, zoom, "right", page_width, viewport_h, gap)
+    if right_rect then
+        self:_paintJoinPage(target, right_page,
+            self.document:getNativePageDimensions(right_page),
+            x + math.floor(right_rect.x), y + math.floor(right_rect.y), zoom)
     end
 end
 

@@ -23,6 +23,7 @@ local TitleBar = require("ui/widget/titlebar")
 local Geom = require("ui/geometry")
 local VirtualImageDocument = require("virtualimagedocument")
 local VirtualPageCanvas = require("virtualpagecanvas")
+local PageJoin = require("kamarepagejoin")
 local KavitaClient = require("kavitaclient")
 local Math = require("optmath")
 local ButtonDialog = require("ui/widget/buttondialog")
@@ -90,6 +91,9 @@ local KamareImageViewer = InputContainer:extend{
     canvas = nil,
     canvas_container = nil,
     _images_list_cur = 1,
+    -- Transient manual page-join plan (kamarepagejoin.plan). Never persisted;
+    -- cleared by the next page turn, chapter switch, close, or layout change.
+    _temp_join = nil,
 
     on_close_callback = nil,
     start_page = 1,
@@ -391,6 +395,9 @@ function KamareImageViewer:_resolveLocalCache()
 end
 
 function KamareImageViewer:_initDocument()
+    self._temp_join = nil
+    if self.canvas then self.canvas:clearTempJoin() end
+
     if not self.images_list_data then
         logger.err("KamareImageViewer: No images_list_data provided. Displaying empty screen.")
         self.images_list_data = { function() return nil end }
@@ -1262,6 +1269,9 @@ end
 function KamareImageViewer:onPageHold(ges)
     if self.long_press_magnifier ~= 1 then return false end
     if self.view_mode ~= 0 then return false end
+    -- The magnifier's coordinate mapping is for one page; while a temporary
+    -- join is shown there is no single page to anchor it to.
+    if self._temp_join then return false end
     local canvas = self.canvas
     if not (canvas and canvas.dimen and ges and ges.pos) then return false end
     if not (self.virtual_document and self.virtual_document.is_open) then return false end
@@ -1796,6 +1806,7 @@ function KamareImageViewer:onSetViewMode(value)
     local mode = tonumber(value) or 0
     if mode == self.view_mode then return true end
 
+    self:_clearTempJoinState()
     self.view_mode = mode
     self.configurable.view_mode = mode
     self._pending_page_direction = true
@@ -1844,6 +1855,7 @@ function KamareImageViewer:onSetPageDirection(value)
     local direction = tonumber(value) or 0
     if direction == self.page_direction then return true end
 
+    self:_clearTempJoinState()
     self.page_direction = direction
     self.configurable.page_direction = direction
 
@@ -1867,6 +1879,7 @@ function KamareImageViewer:onSetWidePageMode(value)
     mode = Math.clamp(mode, 0, 2)
     if mode == self.wide_page_mode then return true end
 
+    self:_clearTempJoinState()
     self.wide_page_mode = mode
     self.configurable.wide_page_mode = mode
     self:syncAndSaveSettings()
@@ -1878,6 +1891,7 @@ function KamareImageViewer:onSetSplitWideDirection(value)
     local direction = Math.clamp(tonumber(value) or 0, 0, 2)
     if direction == self.split_wide_direction then return true end
 
+    self:_clearTempJoinState()
     self.split_wide_direction = direction
     self.configurable.split_wide_direction = direction
     self:syncAndSaveSettings()
@@ -1889,6 +1903,7 @@ function KamareImageViewer:onSetCropBorders(value)
     local enabled = value == true or value == 1 or value == "1"
     if enabled == self.crop_borders then return true end
 
+    self:_clearTempJoinState()
     self.crop_borders = enabled
     self.configurable.crop_borders = enabled and 1 or 0
     self:syncAndSaveSettings()
@@ -2366,6 +2381,14 @@ end
 -- gate so they never disagree about what "visible" means.
 function KamareImageViewer:_currentVisiblePages()
     if not self.virtual_document then return {} end
+
+    if self._temp_join then
+        local plan = self._temp_join
+        local joined = {}
+        if plan.first and plan.first > 0 then joined[#joined + 1] = plan.first end
+        if plan.second and plan.second > 0 then joined[#joined + 1] = plan.second end
+        return joined
+    end
 
     local pages = {}
     if self.view_mode == 1 then
@@ -3178,6 +3201,17 @@ function KamareImageViewer:onSwipe(_, ges)
         end
     end
 
+    -- 单页模式：下滑是「合页」开关。左右继续翻页；上滑保持上一页。
+    -- 滚动模式在上面已经 return；双页模式不做合页，下滑仍按翻页处理。
+    if dir == "south" and self.view_mode == 0 then
+        if self._temp_join then
+            self:exitTempJoin()
+        else
+            self:enterTempJoin()
+        end
+        return true
+    end
+
     -- 不是滚动模式（或左右划动）：当成翻页。遥控器的单击就是这条路径，
     -- 绑定只认 keycode，所以「绑不上」的键只有在这里才能用。
     local action = Pager.swipe_action(dir, Pager.swipe_flipped())
@@ -3387,6 +3421,7 @@ function KamareImageViewer:_isPageCached(page)
 end
 
 function KamareImageViewer:switchToImageNum(page)
+    local had_join = self:_clearTempJoinState()
     self:recordViewingTimeIfValid()
     page = Math.clamp(page, 1, self._images_list_nb)
 
@@ -3397,7 +3432,10 @@ function KamareImageViewer:switchToImageNum(page)
         end
     end
 
-    if page == self._images_list_cur then return end
+    if page == self._images_list_cur then
+        if had_join then self:updateImageOnly() end
+        return
+    end
 
     self._reached_end = false
 
@@ -3443,6 +3481,10 @@ function KamareImageViewer:switchToImageNum(page)
 end
 
 function KamareImageViewer:onShowNextImage()
+    if self._temp_join then
+        return self:_leaveTempJoin(true)
+    end
+
     local is_rtl = self.page_direction == 1
 
     if is_rtl then
@@ -3453,6 +3495,10 @@ function KamareImageViewer:onShowNextImage()
 end
 
 function KamareImageViewer:onShowPrevImage()
+    if self._temp_join then
+        return self:_leaveTempJoin(false)
+    end
+
     -- In RTL mode, "prev" in reading direction means going forward in page numbers
     local is_rtl = self.page_direction == 1
 
@@ -3461,6 +3507,81 @@ function KamareImageViewer:onShowPrevImage()
     else
         return self:_showPrevImageInternal()
     end
+end
+
+--- Clear the transient join state without repainting (callers own the repaint).
+function KamareImageViewer:_clearTempJoinState()
+    if not self._temp_join then return false end
+    self._temp_join = nil
+    if self.canvas then self.canvas:clearTempJoin() end
+    return true
+end
+
+function KamareImageViewer:_prefetchJoinPair(plan)
+    if not (plan and self.virtual_document) then return end
+    local gen = self._prefetch_gen
+    for __, page in ipairs({ plan.first, plan.second }) do
+        self:_ensurePageReady(page, gen, nil, true)
+    end
+end
+
+--- Enter the one-shot join for the current page. A rejected plan is silent
+--- (log only) and still consumes the gesture, so a failed join never turns a
+--- page by accident.
+function KamareImageViewer:enterTempJoin()
+    if self.view_mode ~= 0 then return false end
+    if not (self.virtual_document and self.canvas) then return false end
+    if self._temp_join then return true end
+
+    local plan, reason = PageJoin.plan(self.virtual_document, self._images_list_cur)
+    if not plan then
+        logger.info("[kamare:join] rejected: " .. tostring(reason)
+            .. " page=" .. tostring(self._images_list_cur))
+        return false
+    end
+
+    self._temp_join = plan
+    self.canvas:setTempJoin(plan)
+    self:updateImageOnly()
+    self:updateFooter()
+    self:_prefetchJoinPair(plan)
+    logger.info(string.format("[kamare:join] %s pages=%d,%d",
+        plan.kind, plan.first, plan.second))
+    return true
+end
+
+--- Leave the join and stay on the current page (down-swipe toggle).
+function KamareImageViewer:exitTempJoin()
+    if not self:_clearTempJoinState() then return false end
+    self:updateImageOnly()
+    self:updateFooter()
+    return true
+end
+
+--- Leave the join by a page turn. The target is numeric and deliberately
+--- bypasses the RTL page-turn inversion: 5+6 -> 7 forward, -> 4 back.
+function KamareImageViewer:_leaveTempJoin(forward)
+    local plan = self._temp_join
+    if not plan then return false end
+
+    local target = forward and PageJoin.next_target(plan) or PageJoin.prev_target(plan)
+    self:_clearTempJoinState()
+
+    local count = self._images_list_nb or 0
+    if target and target >= 1 and target <= count then
+        if target == self._images_list_cur then
+            self:updateImageOnly()
+        else
+            self:switchToImageNum(target)
+        end
+    else
+        self:updateImageOnly()
+        if forward and target and target > count then
+            self:_checkAndOfferNextChapter()
+        end
+    end
+    self:updateFooter()
+    return true
 end
 
 function KamareImageViewer:_showNextImageInternal()
@@ -3967,6 +4088,7 @@ function KamareImageViewer:onClose()
 end
 
 function KamareImageViewer:onCloseWidget()
+    self._temp_join = nil
     if self.canvas then self.canvas:endLoupe() end
     -- Stop the pager rescan loop; the attached fd is intentionally kept (the
     -- device is shared with the rest of the process).
