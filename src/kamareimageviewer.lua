@@ -125,6 +125,8 @@ local KamareImageViewer = InputContainer:extend{
 
     -- Long-press magnifier: hold on a page to show a local magnified window.
     long_press_magnifier = 1, -- 0 = off, 1 = on
+    -- Swipe down in page mode to join the current page with the next one.
+    swipe_down_join = 1, -- 0 = off, 1 = on
     -- Loupe magnification relative to the page's current display zoom.
     magnifier_zoom = 2.0,
     -- Loupe window size as a fraction of the screen's short side.
@@ -691,6 +693,7 @@ function KamareImageViewer:loadSettings()
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.swipe_down_join = self.swipe_down_join
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -724,6 +727,7 @@ function KamareImageViewer:loadSettings()
         or self.configurable.crop_borders == 1
         or self.configurable.crop_borders == "1"
     self.long_press_magnifier = tonumber(self.configurable.long_press_magnifier) or 1
+    self.swipe_down_join = tonumber(self.configurable.swipe_down_join) or 1
     self.magnifier_zoom = Math.clamp(tonumber(self.configurable.magnifier_zoom) or 2.0, 1.25, 2.5)
     local size_percent = tonumber(self.configurable.magnifier_scope) or 25
     if size_percent <= 1 then size_percent = size_percent * 100 end
@@ -760,6 +764,7 @@ function KamareImageViewer:syncAndSaveSettings()
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.swipe_down_join = self.swipe_down_join
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -1199,7 +1204,7 @@ function KamareImageViewer:onTapMenu()
 end
 
 --- 阅读页里的翻页器入口（长按顶部 8% 打开）。
---- 已经合并到下方阅读设置：直接跳到第 3 个 tab（设置前一个），不另开一份菜单。
+--- 已经合并到下方阅读设置：直接跳到「蓝牙」tab（设置前一个），不另开一份菜单。
 --- 不依赖 kamare 书库，所以在月读里打开的书也能用。
 function KamareImageViewer:onPagerMenu()
     return self:onShowConfigMenu(self.options.pager_panel or 1)
@@ -1218,6 +1223,31 @@ end
 
 function KamareImageViewer:onShowPagerKeys()
     Pager.show_bindings()
+    return true
+end
+
+--- One-off pager actions, moved out of the settings tab so that tab only
+--- contains real settings.
+function KamareImageViewer:onShowPagerTools()
+    local dialog
+    local function close_and(fn)
+        return function()
+            if dialog then UIManager:close(dialog) end
+            fn()
+        end
+    end
+    dialog = ButtonDialog:new{
+        title = _("Pager tools"),
+        title_align = "center",
+        buttons = {
+            { { text = _("Rescan now"), callback = close_and(function() self:onRescanPager() end) } },
+            { { text = _("Sniff pager keys (30s)"), callback = close_and(function() self:onSniffPagerKeys() end) } },
+            { { text = _("Save pager diagnostics to file"), callback = close_and(function() self:onSavePagerDiagnostics() end) } },
+            { { text = _("Pager diagnostics"), callback = close_and(function() self:onShowPagerDiagnostics() end) } },
+            { { text = _("Close"), callback = close_and(function() end) } },
+        },
+    }
+    UIManager:show(dialog)
     return true
 end
 
@@ -1356,6 +1386,7 @@ function KamareImageViewer:onShowConfigMenu(panel_index)
     self.configurable.split_wide_direction = self.split_wide_direction
     self.configurable.crop_borders = self.crop_borders and 1 or 0
     self.configurable.long_press_magnifier = self.long_press_magnifier
+    self.configurable.swipe_down_join = self.swipe_down_join
     self.configurable.magnifier_zoom = self.magnifier_zoom
     self.configurable.magnifier_scope = math.floor(self.magnifier_scope * 100 + 0.5)
     self.configurable.zoom_mode_type = self.zoom_mode
@@ -1952,6 +1983,21 @@ function KamareImageViewer:onSetLongPressMagnifier(value)
     if not enabled and self.canvas then
         local region = self.canvas:endLoupe()
         if region then UIManager:setDirty(self, "partial", region) end
+    end
+    self:syncAndSaveSettings()
+    return true
+end
+
+function KamareImageViewer:onSetSwipeDownJoin(value)
+    local enabled = tonumber(value) or 0
+    if enabled == self.swipe_down_join then return true end
+
+    self.swipe_down_join = enabled
+    self.configurable.swipe_down_join = enabled
+    if enabled == 0 then
+        -- Turning the gesture off must not leave a stale pair on screen.
+        self:_clearTempJoinState()
+        self:updateImageOnly()
     end
     self:syncAndSaveSettings()
     return true
@@ -3203,7 +3249,7 @@ function KamareImageViewer:onSwipe(_, ges)
 
     -- 单页模式：下滑是「合页」开关。左右继续翻页；上滑保持上一页。
     -- 滚动模式在上面已经 return；双页模式不做合页，下滑仍按翻页处理。
-    if dir == "south" and self.view_mode == 0 then
+    if dir == "south" and self.view_mode == 0 and self.swipe_down_join == 1 then
         if self._temp_join then
             self:exitTempJoin()
         else

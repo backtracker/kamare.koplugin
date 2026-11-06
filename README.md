@@ -28,7 +28,10 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
   only decides which one is on the left. The join is one-shot: the next page
   turn skips the pair (5+6 -> 7). Wide pages (already a spread), strip pages,
   and the last page are left alone. Nothing is written to settings and
-  `view_mode` is not changed.
+  `view_mode` is not changed. Toggle it in the reader config menu's new
+  **Interaction** tab (`Swipe down to join pages`, on by default); that update
+  also regroups the menu into Reading / Layout / Interaction / Pager / Settings
+  and moves the pager diagnostics actions behind a `Pager tools` dialog.
 
 ## What's new in 0.10.10
 

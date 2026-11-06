@@ -14,12 +14,23 @@ return function(t)
 
     local viewer = read_src("kamareimageviewer.lua")
     local canvas = read_src("virtualpagecanvas.lua")
+    local options = read_src("kamareoptions.lua")
 
     ------------------------------------------------------------------------
-    -- Trigger: down swipe in page mode only
+    -- Trigger: down swipe in page mode only, gated by the setting
     ------------------------------------------------------------------------
-    t.ok(viewer:find('dir == "south" and self.view_mode == 0', 1, true) ~= nil,
-        "JW1: down swipe is intercepted in page mode")
+    t.ok(viewer:find('dir == "south" and self.view_mode == 0 and self.swipe_down_join == 1', 1, true) ~= nil,
+        "JW1: down swipe is intercepted in page mode when the setting is on")
+    t.ok(viewer:find("self.swipe_down_join = tonumber(self.configurable.swipe_down_join) or 1", 1, true) ~= nil,
+        "JW1: the setting is loaded from configurable")
+    t.ok(viewer:find("function KamareImageViewer:onSetSwipeDownJoin", 1, true) ~= nil,
+        "JW1: the switch has a handler")
+    t.ok(options:find('name = "swipe_down_join"', 1, true) ~= nil,
+        "JW1: the reader menu exposes the switch")
+    t.ok(options:find('event = "SetSwipeDownJoin"', 1, true) ~= nil,
+        "JW1: the row dispatches SetSwipeDownJoin")
+    t.ok(options:find('icon = "appbar.tools"', 1, true) ~= nil,
+        "JW1: the interaction tab exists")
     t.ok(viewer:find("function KamareImageViewer:enterTempJoin", 1, true) ~= nil,
         "JW1: enterTempJoin exists")
     t.ok(viewer:find("function KamareImageViewer:exitTempJoin", 1, true) ~= nil,

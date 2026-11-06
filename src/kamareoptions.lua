@@ -27,6 +27,8 @@ end
 local KamareOptions = {
     prefix = "kamare",
     {
+        -- Reading behaviour: what a page is, which direction to read, and what
+        -- happens at the end of a chapter. Layout lives in the next tab.
         icon = "appbar.pageview",
         options = {
             {
@@ -85,6 +87,103 @@ local KamareOptions = {
                 event = "SetCropBorders",
                 args = {0, 1},
                 help_text = _([[Automatically trim uniform white or black margins around page content (Mihon-style). Each page is analyzed after download; pages without uniform borders are left unchanged. Detection adds a one-time decode per page.]]),
+            },
+            {
+                name = "footer_mode",
+                name_text = _("Footer"),
+                toggle = {_("Off"), _("Progress"), _("Percentage"), _("Time Left"), _("Clock")},
+                values = {7, 1, 5, 6, 3},
+                args = {7, 1, 5, 6, 3},
+                default_value = 1,
+                event = "SetFooterMode",
+                help_text = _([[Choose what information to display in the footer.]]),
+            },
+            {
+                name = "chapter_end_behavior",
+                name_text = _("Chapter End"),
+                toggle = {_("Stop"), _("Ask"), _("Auto")},
+                values = {0, 1, 2},
+                default_value = 1,
+                event = "SetChapterEndBehavior",
+                args = {0, 1, 2},
+                help_text = _([[Choose what happens when you reach the end of a chapter: 'Stop' stays on the last page, 'Ask' shows a dialog to continue or close, 'Auto' automatically continues to the next chapter.]]),
+            },
+        },
+    },
+    {
+        -- Geometry and appearance: how the page is fitted, spaced and framed.
+        icon = "appbar.pagefit",
+        options = {
+            {
+                name = "zoom_mode_type",
+                name_text = _("Fit"),
+                toggle = {_("full"), _("width"), _("height")},
+                values = {0,1,2},
+                default_value = 0,
+                event = "DefineZoom",
+                args = {0,1,2},
+                help_text = _([[Set how the page should be resized to fit the screen. In continuous mode, only 'width' is available for consistent page alignment.]]),
+                enabled_func = function(configurable)
+                    local mode = configurable.view_mode or 0
+                    return mode == 0 or mode == 1
+                end,
+            },
+            {
+                name = "h_margin",
+                name_text = _("Left/Right Margin"),
+                buttonprogress = true,
+                values = {0, 10, 20, 30, 40, 60, 80, 100},
+                default_pos = 1,
+                default_value = 0,
+                event = "HMarginUpdate",
+                args = {0, 10, 20, 30, 40, 60, 80, 100},
+                name_text_hold_callback = optionsutil.showValues,
+                name_text_unit = true,
+                help_text = _([[Sets the margin on the left and right sides of the viewport. Pages are inset from the screen edges by this amount.]]),
+                more_options = true,
+                more_options_param = {
+                    value_step = 5, value_hold_step = 20,
+                    value_min = 0, value_max = 300,
+                    precision = "%.0f",
+                },
+            },
+            {
+                name = "top_margin",
+                name_text = _("Top Margin"),
+                buttonprogress = true,
+                values = {0, 10, 20, 30, 40, 60, 80, 100},
+                default_pos = 1,
+                default_value = 0,
+                event = "TopMarginUpdate",
+                args = {0, 10, 20, 30, 40, 60, 80, 100},
+                name_text_hold_callback = optionsutil.showValues,
+                name_text_unit = true,
+                help_text = _([[Sets the margin at the top of the viewport.]]),
+                more_options = true,
+                more_options_param = {
+                    value_step = 5, value_hold_step = 20,
+                    value_min = 0, value_max = 300,
+                    precision = "%.0f",
+                },
+            },
+            {
+                name = "bottom_margin",
+                name_text = _("Bottom Margin"),
+                buttonprogress = true,
+                values = {0, 10, 20, 30, 40, 60, 80, 100},
+                default_pos = 1,
+                default_value = 0,
+                event = "BottomMarginUpdate",
+                args = {0, 10, 20, 30, 40, 60, 80, 100},
+                name_text_hold_callback = optionsutil.showValues,
+                name_text_unit = true,
+                help_text = _([[Sets the margin at the bottom of the viewport.]]),
+                more_options = true,
+                more_options_param = {
+                    value_step = 5, value_hold_step = 20,
+                    value_min = 0, value_max = 300,
+                    precision = "%.0f",
+                },
             },
             {
                 name = "page_gap_height",
@@ -162,19 +261,13 @@ local KamareOptions = {
                 event = "SetBackgroundColor",
                 help_text = _([[Choose the background color for the image viewer.]]),
             },
-            {
-                -- Keep the magnifier rows last in the first panel: the config
-                -- dialog is bottom-anchored, so on short screens the top rows
-                -- can be clipped while the last ones are always visible.
-                name = "long_press_magnifier",
-                name_text = _("Long-press magnifier"),
-                toggle = {_("off"), _("on")},
-                values = {0, 1},
-                default_value = 1,
-                event = "SetLongPressMagnifier",
-                args = {0, 1},
-                help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
-            },
+        },
+    },
+    {
+        -- Interaction aids: gestures that do something to the page rather than
+        -- changing how it is laid out.
+        icon = "appbar.tools",
+        options = {
             {
                 name = "magnifier_scope",
                 name_text = _("Magnifier Scope"),
@@ -218,128 +311,49 @@ local KamareOptions = {
                     precision = "%.2f",
                 },
                 help_text = _([[How much the captured area is enlarged. A higher value makes the window bigger as well, so the same area is shown with bigger text.]]),
-            }
-        }
-    },
-    {
-        icon = "appbar.pagefit",
-        options = {
+            },
             {
-                name = "zoom_mode_type",
-                name_text = _("Fit"),
-                toggle = {_("full"), _("width"), _("height")},
-                values = {0,1,2},
-                default_value = 0,
-                event = "DefineZoom",
-                args = {0,1,2},
-                help_text = _([[Set how the page should be resized to fit the screen. In continuous mode, only 'width' is available for consistent page alignment.]]),
+                -- Keep the switches last: the config dialog is bottom-anchored,
+                -- so the most-used rows stay visible on short screens.
+                name = "long_press_magnifier",
+                name_text = _("Long-press magnifier"),
+                toggle = {_("off"), _("on")},
+                values = {0, 1},
+                default_value = 1,
+                event = "SetLongPressMagnifier",
+                args = {0, 1},
+                help_text = _([[Hold on a page to show a magnified window under your finger; release to return. The top 8% of the screen still opens the pager menu. Page mode only.]]),
+            },
+            {
+                name = "swipe_down_join",
+                name_text = _("Swipe down to join pages"),
+                toggle = {_("off"), _("on")},
+                values = {0, 1},
+                default_value = 1,
+                event = "SetSwipeDownJoin",
+                args = {0, 1},
                 enabled_func = function(configurable)
-                    local mode = configurable.view_mode or 0
-                    return mode == 0 or mode == 1
+                    return (configurable.view_mode or 0) == 0
                 end,
+                help_text = _([[In page mode, swipe down to show this page and the next one together. Two separate pages use Dual Page Gap; split halves are joined tight. Swipe down again to leave; the next page turn skips the pair.]]),
             },
-            {
-                name = "h_margin",
-                name_text = _("Left/Right Margin"),
-                buttonprogress = true,
-                values = {0, 10, 20, 30, 40, 60, 80, 100},
-                default_pos = 1,
-                default_value = 0,
-                event = "HMarginUpdate",
-                args = {0, 10, 20, 30, 40, 60, 80, 100},
-                name_text_hold_callback = optionsutil.showValues,
-                name_text_unit = true,
-                help_text = _([[Sets the margin on the left and right sides of the viewport. Pages are inset from the screen edges by this amount.]]),
-                more_options = true,
-                more_options_param = {
-                    value_step = 5, value_hold_step = 20,
-                    value_min = 0, value_max = 300,
-                    precision = "%.0f",
-                },
-            },
-            {
-                name = "top_margin",
-                name_text = _("Top Margin"),
-                buttonprogress = true,
-                values = {0, 10, 20, 30, 40, 60, 80, 100},
-                default_pos = 1,
-                default_value = 0,
-                event = "TopMarginUpdate",
-                args = {0, 10, 20, 30, 40, 60, 80, 100},
-                name_text_hold_callback = optionsutil.showValues,
-                name_text_unit = true,
-                help_text = _([[Sets the margin at the top of the viewport.]]),
-                more_options = true,
-                more_options_param = {
-                    value_step = 5, value_hold_step = 20,
-                    value_min = 0, value_max = 300,
-                    precision = "%.0f",
-                },
-            },
-            {
-                name = "bottom_margin",
-                name_text = _("Bottom Margin"),
-                buttonprogress = true,
-                values = {0, 10, 20, 30, 40, 60, 80, 100},
-                default_pos = 1,
-                default_value = 0,
-                event = "BottomMarginUpdate",
-                args = {0, 10, 20, 30, 40, 60, 80, 100},
-                name_text_hold_callback = optionsutil.showValues,
-                name_text_unit = true,
-                help_text = _([[Sets the margin at the bottom of the viewport.]]),
-                more_options = true,
-                more_options_param = {
-                    value_step = 5, value_hold_step = 20,
-                    value_min = 0, value_max = 300,
-                    precision = "%.0f",
-                },
-            }
-        }
+        },
     },
     {
-        -- Pager (Bluetooth page-turner) settings. Previously these lived in a
-        -- separate long-press menu at the top of the page; the long-press now
-        -- opens this tab, so there is one place for all of them. Rows are
-        -- ordered least-used first because the dialog is bottom-anchored and
-        -- may clip the rows at the top on short screens.
+        -- Pager (Bluetooth page-turner). Enable/Keys/Swipe are the settings;
+        -- the one-off diagnostics actions live behind "Pager tools" so this tab
+        -- stays a settings tab.
         icon = plugin_icon("bluetooth"),
         options = {
             {
-                name = "pager_rescan",
-                name_text = _("Rescan now"),
-                toggle = {_("Rescan")},
-                values = {0},
-                event = "RescanPager",
-                help_text = _([[Look for the page-turner again after reconnecting it.]]),
-            },
-            {
-                name = "pager_save_diagnostics",
-                name_text = _("Save pager diagnostics to file"),
-                toggle = {_("Save")},
-                values = {0},
-                event = "SavePagerDiagnostics",
-                help_text = _([[Write the current status and recent keys to koreader/kamare-pager.log.]]),
-            },
-            {
-                name = "pager_sniff",
-                name_text = _("Sniff pager keys (30s)"),
-                toggle = {_("Start")},
-                values = {0},
-                event = "SniffPagerKeys",
-                help_text = _([[Watch every input device for 30 seconds, then open the diagnostics page.]]),
-            },
-            {
-                name = "pager_diagnostics",
-                name_text = _("Pager diagnostics"),
+                name = "pager_tools",
+                name_text = _("Pager tools"),
                 toggle = {_("Open")},
                 values = {0},
-                event = "ShowPagerDiagnostics",
-                help_text = _([[Show the live status, bound keys, and the last key received.]]),
+                event = "ShowPagerTools",
+                help_text = _([[Rescan the page-turner, sniff keys, save diagnostics, or open the live status page.]]),
             },
             {
-                -- Keep the two real settings below the action rows, where they
-                -- are always visible on short screens.
                 name = "pager_swipe_inverted",
                 name_text = _("Swipe Page Turn"),
                 toggle = {_("Normal"), _("Inverted")},
@@ -371,10 +385,11 @@ local KamareOptions = {
                 event = "SetPagerEnabled",
                 args = {0, 1},
                 help_text = _([[Take over the Bluetooth page-turner. Turn it off here to release the device.]]),
-            }
-        }
+            },
+        },
     },
     {
+        -- Rendering, performance and device controls.
         icon = "appbar.settings",
         options = {
             {
@@ -444,26 +459,6 @@ local KamareOptions = {
                 help_text = _([[Auto rotation adjusts screen orientation automatically. Locked keeps the current system rotation fixed.]]),
             },
             {
-                name = "footer_mode",
-                name_text = _("Footer"),
-                toggle = {_("Off"), _("Progress"), _("Percentage"), _("Time Left"), _("Clock")},
-                values = {7, 1, 5, 6, 3},
-                args = {7, 1, 5, 6, 3},
-                default_value = 1,
-                event = "SetFooterMode",
-                help_text = _([[Choose what information to display in the footer.]]),
-            },
-            {
-                name = "chapter_end_behavior",
-                name_text = _("Chapter End"),
-                toggle = {_("Stop"), _("Ask"), _("Auto")},
-                values = {0, 1, 2},
-                default_value = 1,
-                event = "SetChapterEndBehavior",
-                args = {0, 1, 2},
-                help_text = _([[Choose what happens when you reach the end of a chapter: 'Stop' stays on the last page, 'Ask' shows a dialog to continue or close, 'Auto' automatically continues to the next chapter.]]),
-            },
-            {
                 name = "frontlight",
                 name_text = _("Frontlight"),
                 toggle = { _("Adjust") },
@@ -471,11 +466,11 @@ local KamareOptions = {
                 event = "ShowFrontlight",
                 help_text = _([[Open the frontlight controls to adjust brightness and warmth.]]),
                 enabled_func = function() return Device:hasFrontlight() end,
-            }
-        }
+            },
+        },
     },
     -- Lets the viewer jump straight to the pager tab (top-8% long-press).
-    pager_panel = 3,
+    pager_panel = 4,
 }
 
 return KamareOptions

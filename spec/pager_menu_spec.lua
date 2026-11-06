@@ -49,12 +49,12 @@ return function(t)
     ----------------------------------------------------------------
     -- Tab position and icon
     ----------------------------------------------------------------
-    t.eq(#options, 4, "P1: four config tabs")
-    t.eq(options.pager_panel, 3, "P1: pager_panel points at the third tab")
+    t.eq(#options, 5, "P1: five config tabs")
+    t.eq(options.pager_panel, 4, "P1: pager_panel points at the fourth tab")
 
     local panel = options[options.pager_panel]
     t.ok(panel ~= nil and panel.options ~= nil, "P1: the pager tab exists at that index")
-    t.ok(options[4].icon == "appbar.settings", "P1: the settings tab stays last")
+    t.ok(options[5].icon == "appbar.settings", "P1: the settings tab stays last")
 
     local icon = panel and panel.icon
     t.ok(type(icon) == "string" and icon:find("icons/bluetooth", 1, true) ~= nil,
@@ -79,10 +79,7 @@ return function(t)
     end
 
     local expected = {
-        { "pager_rescan", "RescanPager" },
-        { "pager_save_diagnostics", "SavePagerDiagnostics" },
-        { "pager_sniff", "SniffPagerKeys" },
-        { "pager_diagnostics", "ShowPagerDiagnostics" },
+        { "pager_tools", "ShowPagerTools" },
         { "pager_swipe_inverted", "SetPagerSwipeInverted" },
         { "pager_keys", "ShowPagerKeys" },
         { "pager_enabled", "SetPagerEnabled" },

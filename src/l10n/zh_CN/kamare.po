@@ -1318,3 +1318,15 @@ msgstr "接管蓝牙翻页器。关闭后会释放设备。"
 
 msgid "Write the current status and recent keys to koreader/kamare-pager.log."
 msgstr "把当前状态和最近的按键写入 koreader/kamare-pager.log。"
+
+msgid "Swipe down to join pages"
+msgstr "下滑合页"
+
+msgid "In page mode, swipe down to show this page and the next one together. Two separate pages use Dual Page Gap; split halves are joined tight. Swipe down again to leave; the next page turn skips the pair."
+msgstr "单页模式下向下滑动，把本页和下一页合在一起显示。两张独立页使用「双页间隙」；一张横页拆开的两半会紧贴。再次下滑退出；下一次翻页会跳过刚合过的两页。"
+
+msgid "Pager tools"
+msgstr "翻页器工具"
+
+msgid "Rescan the page-turner, sniff keys, save diagnostics, or open the live status page."
+msgstr "重新扫描翻页器、嗅探按键、保存诊断，或打开实时状态页。"
