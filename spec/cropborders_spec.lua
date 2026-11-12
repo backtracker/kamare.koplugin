@@ -96,4 +96,53 @@ return function(t)
             t.eq(rect.gutter.x2, 200, "C5: gutter ends at the right page edge")
         end
     end
+
+    -- A 1px artwork edge comes back from downscaling as a mid-grey line: light
+    -- enough that the strong pass does not see it, dark enough that the loose
+    -- pass does. It sits right next to the strong bound, so counting it as
+    -- margin content made the loose bound win and half the margin stayed. The
+    -- grey line here stands in for that artefact; the watermark is what pushes
+    -- the loose bound out in the first place.
+    local function encode(bb, name)
+        local path = t.tmpdir() .. "/" .. name .. ".png"
+        assert(bb:writePNG(path))
+        bb:free()
+        local f = assert(io.open(path, "rb"))
+        local data = f:read("*a")
+        f:close()
+        return data
+    end
+
+    do
+        local pw, ph = 700, 1000
+        local bb = Blitbuffer.new(pw, ph, Blitbuffer.TYPE_BB8)
+        bb:fill(Blitbuffer.COLOR_WHITE)
+        -- Black panel (100..899) with the grey remnant of its right border.
+        bb:paintRect(60, 100, 541, 800, Blitbuffer.COLOR_BLACK)
+        bb:paintRect(601, 100, 1, 800, Blitbuffer.Color8(150))
+        -- Light watermark further out, inside the panel's rows.
+        bb:paintRect(660, 800, 20, 20, Blitbuffer.Color8(175))
+
+        local r = CropBorders.detect(encode(bb, "crop-right"), pw, ph)
+        t.ok(r ~= nil, "C6: watermark with grey artwork edge still crops")
+        if r then
+            t.eq(r.x + r.w, 601, "C6: right side cropped past the grey edge and watermark")
+        end
+    end
+
+    do
+        local pw, ph = 700, 1000
+        local bb = Blitbuffer.new(pw, ph, Blitbuffer.TYPE_BB8)
+        bb:fill(Blitbuffer.COLOR_WHITE)
+        -- Same artefact on the bottom edge of a panel.
+        bb:paintRect(100, 60, 500, 840, Blitbuffer.COLOR_BLACK)
+        bb:paintRect(100, 900, 500, 1, Blitbuffer.Color8(150))
+        bb:paintRect(300, 950, 20, 20, Blitbuffer.Color8(175))
+
+        local r = CropBorders.detect(encode(bb, "crop-bottom"), pw, ph)
+        t.ok(r ~= nil, "C7: watermark with grey artwork edge still crops")
+        if r then
+            t.eq(r.y + r.h, 900, "C7: bottom side cropped past the grey edge and watermark")
+        end
+    end
 end

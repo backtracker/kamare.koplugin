@@ -357,16 +357,22 @@ function CropBorders.findBorders(gray, width, height)
     local left, top, right, bottom, margin = findBounds(gray, width, height, false)
     local sl, st, sr, sb = findBounds(gray, width, height, true)
 
-    if sl > left and stripIsSparse(gray, width, left, sl, top, bottom, margin, false) then
+    -- The band is the margin between a confident bound and the loose one. Its
+    -- line next to the confident bound is left out of the sparsity test: a 1px
+    -- artwork edge comes back from downscaling as a mid-grey line, which the
+    -- strong pass does not see but the loose pass counts as content. Letting
+    -- that artefact line count made any watermark further out keep the whole
+    -- side uncropped, because the band looked dense from edge to edge.
+    if sl > left and stripIsSparse(gray, width, left, sl - 1, top, bottom, margin, false) then
         left = sl
     end
-    if sr < right and stripIsSparse(gray, width, sr, right, top, bottom, margin, false) then
+    if sr < right and stripIsSparse(gray, width, sr + 1, right, top, bottom, margin, false) then
         right = sr
     end
-    if st > top and stripIsSparse(gray, width, left, right, top, st, margin, true) then
+    if st > top and stripIsSparse(gray, width, left, right, top, st - 1, margin, true) then
         top = st
     end
-    if sb < bottom and stripIsSparse(gray, width, left, right, sb, bottom, margin, true) then
+    if sb < bottom and stripIsSparse(gray, width, left, right, sb + 1, bottom, margin, true) then
         bottom = sb
     end
 
