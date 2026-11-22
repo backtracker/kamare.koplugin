@@ -2864,7 +2864,15 @@ end
 -- from the shared throughput/error thresholds. No samples (fresh chapter) is
 -- treated as top tier so the initial prefetch buffer is aggressive; we scale
 -- down once real measurements show the link is slow or erroring.
+--
+-- Cached chapters are an exception: they never call _recordNetSample, so the
+-- "no samples => top tier" rule used to classify a slow e-reader reading
+-- original-size CBZ images as a gigabit link. The local path also reads and
+-- decodes each page synchronously on the UI thread (see _ensurePageReady),
+-- so an aggressive background chain blocked input long enough for Android to
+-- SIGQUIT the process (ANR). Keep the immediate-next-page warm, but no more.
 function KamareImageViewer:_netTier()
+    if self.page_source == "local" then return 0 end
     if self:_netSampleCount() == 0 then return 3 end
     local bw, err = self:_netBw(), self:_netErrRate()
     local KB = 1024
